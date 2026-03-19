@@ -25,7 +25,10 @@ async function RecurringContent() {
     const name = t.merchant ?? t.description;
     const category =
       t.user_category_override ?? t.ai_category ?? t.redbark_category ?? "Other";
-    const accountName = t.accounts?.redbark_name ?? null;
+    const accounts = (t as any).accounts as { redbark_name: string }[] | { redbark_name: string } | null | undefined;
+    const accountName = Array.isArray(accounts)
+      ? accounts[0]?.redbark_name ?? null
+      : accounts?.redbark_name ?? null;
     const key = `${name}__${accountName ?? "no-account"}`;
 
     if (!seriesMap.has(key)) {
