@@ -8,6 +8,7 @@ import { SpendingChart } from "@/components/dashboard/SpendingChart";
 import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { SavingsProjection } from "@/components/dashboard/SavingsProjection";
 import { DashboardRealtime } from "@/components/dashboard/DashboardRealtime";
+import { AuthGate } from "@/components/auth/AuthGate";
 import { format, addMonths, startOfMonth } from "date-fns";
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -25,7 +26,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   Other: "#888780",
 };
 
-export default async function Dashboard() {
+async function DashboardContent() {
   const supabase = createServiceClient();
   const { start: monthStart, end: monthEnd } = getCurrentMonth();
   const { start: sixMonthStart } = getLastNMonths(6);
@@ -162,5 +163,13 @@ export default async function Dashboard() {
 
       <DashboardRealtime />
     </div>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <AuthGate>
+      <DashboardContent />
+    </AuthGate>
   );
 }

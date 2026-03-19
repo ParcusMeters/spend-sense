@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -9,24 +8,34 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Wallet } from "lucide-react";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    setError(null);
 
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/`,
-      },
-    });
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
 
-    setLoading(false);
-    if (!error) setSent(true);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? "Login failed.");
+      } else {
+        setSent(true);
+      }
+    } catch {
+      setError("Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -38,30 +47,33 @@ export default function LoginPage() {
           </div>
           <CardTitle className="text-xl">SpendSense</CardTitle>
           <p className="text-sm text-muted-foreground">
-            Sign in with a magic link
+            Enter the access password to sign in
           </p>
         </CardHeader>
         <CardContent>
           {sent ? (
-            <div className="text-center space-y-2">
+            <div className="space-y-2 text-center">
               <p className="text-sm font-medium">Check your email</p>
               <p className="text-sm text-muted-foreground">
-                We sent a magic link to <strong>{email}</strong>
+                A magic link has been sent to the configured email address.
               </p>
             </div>
           ) : (
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="password">Password</Label>
                 <Input
-                  id="email"
-                  type="email"
-                  placeholder="marcus@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   required
                 />
               </div>
+              {error ? (
+                <p className="text-sm text-destructive">{error}</p>
+              ) : null}
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

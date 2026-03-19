@@ -3,8 +3,9 @@ export const dynamic = "force-dynamic";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getLastNMonths, getMonthLabel } from "@/lib/utils/dates";
 import { ProjectionsClient } from "./ProjectionsClient";
+import { AuthGate } from "@/components/auth/AuthGate";
 
-export default async function ProjectionsPage() {
+async function ProjectionsContent() {
   const supabase = createServiceClient();
   const { start } = getLastNMonths(6);
 
@@ -60,5 +61,13 @@ export default async function ProjectionsPage() {
         current: Number(goal.current_amount),
       }}
     />
+  );
+}
+
+export default function ProjectionsPage() {
+  return (
+    <AuthGate>
+      <ProjectionsContent />
+    </AuthGate>
   );
 }
