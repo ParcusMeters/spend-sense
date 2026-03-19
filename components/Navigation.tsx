@@ -11,6 +11,7 @@ import {
   Wallet,
   Menu,
   X,
+  Repeat,
 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import { Button } from "@/components/ui/button";
 const links = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/transactions", label: "Transactions", icon: ArrowRightLeft },
+  { href: "/recurring", label: "Recurring", icon: Repeat },
   { href: "/projections", label: "Projections", icon: TrendingUp },
   { href: "/insights", label: "Insights", icon: Brain },
 ];
