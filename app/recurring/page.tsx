@@ -23,8 +23,7 @@ async function RecurringContent() {
 
   for (const t of txns ?? []) {
     const name = t.merchant ?? t.description;
-    const category =
-      t.user_category_override ?? t.ai_category ?? t.redbark_category ?? "Other";
+    const category = t.user_category_override ?? t.redbark_category ?? "Other";
     const accounts = (t as any).accounts as { redbark_name: string }[] | { redbark_name: string } | null | undefined;
     const accountName = Array.isArray(accounts)
       ? accounts[0]?.redbark_name ?? null
