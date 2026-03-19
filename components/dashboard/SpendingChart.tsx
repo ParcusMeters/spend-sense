@@ -18,13 +18,13 @@ export function SpendingChart({ data }: SpendingChartProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Spending by Category</CardTitle>
+        <CardTitle>Spending by Category (Last 6 Months)</CardTitle>
       </CardHeader>
       <CardContent>
         {!hasData ? (
           <div className="flex min-h-[220px] flex-col items-center justify-center text-center">
             <p className="text-sm text-muted-foreground">
-              No spending categories for this month.
+              No spending categories for the last 6 months.
             </p>
             <p className="mt-2 text-xs text-muted-foreground">
               This can happen when all debit transactions are categorized as{" "}

@@ -62,22 +62,8 @@ async function DashboardContent() {
     0
   );
 
-  // Spending by category (current month)
-  const categoryMap: Record<string, number> = {};
-  for (const t of txns) {
-    if (t.direction !== "debit") continue;
-    const cat =
-      t.user_category_override ?? t.redbark_category ?? "Other";
-    if (cat === "Transfers") continue;
-    categoryMap[cat] = (categoryMap[cat] ?? 0) + Math.abs(t.amount_cents);
-  }
-  const spendingByCategory = Object.entries(categoryMap)
-    .sort((a, b) => b[1] - a[1])
-    .map(([name, value]) => ({
-      name,
-      value,
-      color: CATEGORY_COLORS[name] ?? "#888780",
-    }));
+  // Spending by category (last 6 months) - computed from `allTxns` below.
+  let spendingByCategory: { name: string; value: number; color: string }[] = [];
 
   // Monthly trend (last 6 months)
   const { data: allTxns } = await supabase
@@ -85,6 +71,21 @@ async function DashboardContent() {
     .select("date, direction, amount_cents, ai_category, redbark_category, user_category_override")
     .gte("date", sixMonthStart)
     .lte("date", monthEnd);
+
+  const categoryMap: Record<string, number> = {};
+  for (const t of allTxns ?? []) {
+    if (t.direction !== "debit") continue;
+    const cat = t.user_category_override ?? t.redbark_category ?? "Other";
+    if (cat === "Transfers") continue;
+    categoryMap[cat] = (categoryMap[cat] ?? 0) + Math.abs(t.amount_cents);
+  }
+  spendingByCategory = Object.entries(categoryMap)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, value]) => ({
+      name,
+      value,
+      color: CATEGORY_COLORS[name] ?? "#888780",
+    }));
 
   const monthlyData: Record<string, { income: number; spending: number }> = {};
   for (const t of allTxns ?? []) {
