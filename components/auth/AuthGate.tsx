@@ -28,11 +28,12 @@ export function AuthGate({ children }: AuthGateProps) {
 
       const supabase = createClient();
 
-      // Handle magic-link redirect: exchange code in URL for a session
+      // Handle magic-link redirects
       if (typeof window !== "undefined") {
         const url = new URL(window.location.href);
         const code = url.searchParams.get("code");
 
+        // 1) PKCE-style magic link (?code=...)
         if (code) {
           console.log("[AuthGate] Found code in URL, exchanging for session");
           try {
@@ -43,6 +44,29 @@ export function AuthGate({ children }: AuthGateProps) {
           } finally {
             url.searchParams.delete("code");
             window.history.replaceState({}, "", url.toString());
+          }
+        } else if (window.location.hash.includes("access_token")) {
+          // 2) Hash-based magic link (#access_token=...)
+          console.log("[AuthGate] Found access_token in hash, setting session");
+          const hash = window.location.hash.substring(1);
+          const params = new URLSearchParams(hash);
+          const access_token = params.get("access_token");
+          const refresh_token = params.get("refresh_token");
+
+          if (access_token && refresh_token) {
+            try {
+              await supabase.auth.setSession({ access_token, refresh_token });
+              console.log("[AuthGate] setSession success");
+            } catch (err) {
+              console.error("[AuthGate] setSession error", err);
+            } finally {
+              // Clean up hash from URL
+              window.location.hash = "";
+            }
+          } else {
+            console.warn(
+              "[AuthGate] access_token or refresh_token missing in hash params"
+            );
           }
         }
       }
