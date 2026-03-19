@@ -16,8 +16,11 @@ export function AuthGate({ children }: AuthGateProps) {
 
   useEffect(() => {
     async function initAuth() {
+      console.log("[AuthGate] initAuth, pathname:", pathname);
+
       // Never try to guard the login route itself
       if (pathname === "/login") {
+        console.log("[AuthGate] On /login, skipping auth check");
         setChecking(false);
         setIsAuthed(false);
         return;
@@ -31,10 +34,12 @@ export function AuthGate({ children }: AuthGateProps) {
         const code = url.searchParams.get("code");
 
         if (code) {
+          console.log("[AuthGate] Found code in URL, exchanging for session");
           try {
             await supabase.auth.exchangeCodeForSession(code);
-          } catch {
-            // ignore, we'll fall back to normal getUser below
+            console.log("[AuthGate] exchangeCodeForSession success");
+          } catch (err) {
+            console.error("[AuthGate] exchangeCodeForSession error", err);
           } finally {
             url.searchParams.delete("code");
             window.history.replaceState({}, "", url.toString());
@@ -42,17 +47,27 @@ export function AuthGate({ children }: AuthGateProps) {
         }
       }
 
-      const { data } = await supabase.auth.getUser();
+      const { data, error } = await supabase.auth.getUser();
+      if (error) {
+        console.error("[AuthGate] getUser error", error);
+      } else {
+        console.log(
+          "[AuthGate] getUser result",
+          data?.user ? "has user" : "no user"
+        );
+      }
 
       if (!data.user) {
+        console.log("[AuthGate] No user, redirecting to /login");
         router.replace("/login");
       } else {
+        console.log("[AuthGate] User present, allowing access");
         setIsAuthed(true);
       }
       setChecking(false);
     }
 
-    initAuth();
+    void initAuth();
   }, [router, pathname]);
 
   if (checking) {
