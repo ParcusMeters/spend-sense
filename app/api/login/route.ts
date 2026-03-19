@@ -30,7 +30,7 @@ export async function POST(request: Request) {
 
   if (error) {
     return NextResponse.json(
-      { error: "Failed to send magic link." },
+      { error: error.message || "Failed to send magic link." },
       { status: 500 }
     );
   }
