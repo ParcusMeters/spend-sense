@@ -23,6 +23,10 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createServiceClient();
+  console.log("Redbark webhook transactions.synced", {
+    newCount: payload.data.new.length,
+    updatedCount: payload.data.updated.length,
+  });
 
   // Upsert accounts and process transactions
   const accountMap = new Map<string, string>();
@@ -115,8 +119,9 @@ export async function POST(request: NextRequest) {
   });
 
   // Fire and forget: AI categorisation + anomaly detection
-  if (payload.data.new.length > 0) {
-    processAIAsync(supabase, payload.data.new, insertedIds).catch(console.error);
+  const aiTransactions = [...payload.data.new, ...payload.data.updated];
+  if (aiTransactions.length > 0) {
+    processAIAsync(supabase, aiTransactions, insertedIds).catch(console.error);
   }
 
   return response;
@@ -144,9 +149,14 @@ async function processAIAsync(
     }));
 
     const results = await categoriseTransactions(toCateg);
+    if (results.length === 0) {
+      console.warn("AI categorisation returned no results", {
+        ids: toCateg.map((t) => t.redbark_id).slice(0, 3),
+      });
+    }
 
     for (const result of results) {
-      await supabase
+      const { data: updatedRows, error: updateError } = await supabase
         .from("transactions")
         .update({
           ai_category: result.category,
@@ -154,7 +164,20 @@ async function processAIAsync(
           is_recurring: result.is_recurring,
           merchant: result.merchant_clean,
         })
-        .eq("redbark_id", result.redbark_id);
+        .eq("redbark_id", result.redbark_id)
+        .select("id");
+
+      if (updateError) {
+        console.error("AI update failed", {
+          redbark_id: result.redbark_id,
+          error: updateError,
+        });
+      }
+      if (!updateError && (!updatedRows || updatedRows.length === 0)) {
+        console.warn("AI update matched 0 rows", {
+          redbark_id: result.redbark_id,
+        });
+      }
 
       // Anomaly detection
       const { data: txnRow } = await supabase

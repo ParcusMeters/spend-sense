@@ -65,14 +65,27 @@ Reply with ONLY a JSON array:
     ],
   });
 
-  const text =
-    message.content[0].type === "text" ? message.content[0].text : "";
+  const textBlock = message.content.find((c) => c.type === "text") as
+    | { type: "text"; text: string }
+    | undefined;
+  const text = textBlock?.text ?? "";
+
   const jsonMatch = text.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) return [];
+  if (!jsonMatch) {
+    console.warn("categoriseTransactions: no JSON array found", {
+      ids: transactions.map((t) => t.redbark_id).slice(0, 3),
+      textLength: text.length,
+    });
+    return [];
+  }
 
   try {
     return JSON.parse(jsonMatch[0]) as CategorisationResult[];
-  } catch {
+  } catch (err) {
+    console.warn("categoriseTransactions: JSON parse failed", {
+      ids: transactions.map((t) => t.redbark_id).slice(0, 3),
+      error: String(err),
+    });
     return [];
   }
 }
