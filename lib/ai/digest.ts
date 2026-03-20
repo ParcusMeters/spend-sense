@@ -55,6 +55,27 @@ export async function generateDigest(
 
   const anomalyCount = transactions.filter((t) => t.is_anomaly).length;
 
+  // For weekly digests, include the previous saved weekly insight as reference
+  // (so Claude can comment on changes vs last week).
+  let previousWeeklyInsight: { summary: string; content: string } | null = null;
+  if (type === "weekly") {
+    const { data: prev } = await supabase
+      .from("insights")
+      .select("summary,content,period_end")
+      .eq("type", "weekly")
+      .lt("period_end", startDate)
+      .order("period_end", { ascending: false })
+      .limit(1);
+
+    const row = prev?.[0];
+    if (row?.summary || row?.content) {
+      previousWeeklyInsight = {
+        summary: row.summary ?? "",
+        content: row.content ?? "",
+      };
+    }
+  }
+
   const prompt = `You are a personal finance analyst for Marcus, based in Perth, Australia. Generate a ${type} financial digest.
 
 Period: ${startDate} to ${endDate}
@@ -67,6 +88,10 @@ Top spending categories:
 ${topCategories}
 
 Flagged anomalies: ${anomalyCount}
+
+${type === "weekly" ? `Previous week analysis (reference only):
+${previousWeeklyInsight?.summary ? `Summary: ${previousWeeklyInsight.summary}` : "Summary: N/A"}
+${previousWeeklyInsight?.content ? previousWeeklyInsight.content.slice(0, 800) : ""}` : ""}
 
 ${type === "weekly" ? "Provide a concise weekly summary with spending patterns, notable transactions, and 2-3 actionable tips." : ""}
 ${type === "monthly" ? "Provide a comprehensive monthly report with trend analysis, category breakdown, savings rate commentary, and 3-5 actionable recommendations." : ""}
