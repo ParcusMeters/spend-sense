@@ -59,10 +59,10 @@ export function TransactionList() {
     }
 
     if (category !== "All") {
-      // For now, treat Redbark category as the source of truth.
-      // Still allow manual overrides to be searchable/filterable.
+      // Match our "effective" category priority:
+      // user override -> AI -> raw Redbark.
       query = query.or(
-        `user_category_override.eq.${category},redbark_category.eq.${category}`
+        `user_category_override.eq.${category},ai_category.eq.${category},redbark_category.eq.${category}`
       );
     }
 

@@ -26,7 +26,8 @@ interface TransactionRowProps {
 }
 
 export function TransactionRow({ transaction: t, onClick }: TransactionRowProps) {
-  const category = t.user_category_override ?? t.redbark_category ?? "Other";
+  const category =
+    t.user_category_override ?? t.ai_category ?? t.redbark_category ?? "Other";
 
   return (
     <div
