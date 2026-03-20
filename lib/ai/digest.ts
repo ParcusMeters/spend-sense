@@ -82,7 +82,12 @@ Write in a friendly but professional tone. Use markdown formatting. Be specific 
       messages: [{ role: "user", content: prompt }],
     });
   } catch (error) {
-    const e = error as any;
+    const e = error as {
+      message?: string;
+      status?: number;
+      code?: string;
+      response?: { status?: number; data?: { code?: string } };
+    };
     console.error("AI digest request failed", {
       type,
       startDate,

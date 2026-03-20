@@ -95,7 +95,12 @@ ${txnList}`;
       ],
     });
   } catch (error) {
-    const e = error as any;
+    const e = error as {
+      message?: string;
+      status?: number;
+      code?: string;
+      response?: { status?: number; data?: { code?: string } };
+    };
     console.error("AI categorise request failed", {
       count: transactions.length,
       aiRunId: ctx?.aiRunId,
@@ -133,23 +138,24 @@ ${txnList}`;
       start !== -1 && end !== -1 && end > start ? cleaned.slice(start, end + 1) : cleaned;
 
     const parsed = JSON.parse(jsonCandidate) as unknown;
-    const results = Array.isArray(parsed) ? parsed : [];
-    if (!Array.isArray(results)) return [];
+    const results: unknown[] = Array.isArray(parsed) ? parsed : [];
 
     // Coerce primitive types because models sometimes return numbers/booleans
     // as strings (e.g. "0.83", "true"). If coercion fails, drop the item.
     const normalised: CategorisationResult[] = [];
-    for (const r of results as any[]) {
-      const redbark_id = String((r as any).redbark_id ?? "").trim();
-      const category = String((r as any).category ?? "").trim();
-      const merchant_clean = String((r as any).merchant_clean ?? "").trim();
+    for (const r of results) {
+      if (!r || typeof r !== "object") continue;
+      const obj = r as Record<string, unknown>;
 
-      const confidenceRaw = (r as any).confidence;
-      const confidenceNum = typeof confidenceRaw === "number"
-        ? confidenceRaw
-        : Number(confidenceRaw);
+      const redbark_id = String(obj.redbark_id ?? "").trim();
+      const category = String(obj.category ?? "").trim();
+      const merchant_clean = String(obj.merchant_clean ?? "").trim();
 
-      const isRecurringRaw = (r as any).is_recurring;
+      const confidenceRaw = obj.confidence;
+      const confidenceNum =
+        typeof confidenceRaw === "number" ? confidenceRaw : Number(confidenceRaw);
+
+      const isRecurringRaw = obj.is_recurring;
       const is_recurring =
         typeof isRecurringRaw === "boolean"
           ? isRecurringRaw

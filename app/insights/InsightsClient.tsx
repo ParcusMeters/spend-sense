@@ -10,6 +10,8 @@ import { Separator } from "@/components/ui/separator";
 import { Brain, Calendar, Loader2 } from "lucide-react";
 import { formatDate } from "@/lib/utils/dates";
 import type { Insight } from "@/lib/supabase/types";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface InsightsClientProps {
   insights: Insight[];
@@ -143,9 +145,12 @@ export function InsightsClient({ insights: initialInsights }: InsightsClientProp
               </CardHeader>
               <Separator />
               <CardContent className="pt-4">
-                <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  className="prose prose-sm dark:prose-invert max-w-none"
+                >
                   {insight.content}
-                </div>
+                </ReactMarkdown>
               </CardContent>
             </Card>
           ))
