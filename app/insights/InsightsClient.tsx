@@ -145,12 +145,11 @@ export function InsightsClient({ insights: initialInsights }: InsightsClientProp
               </CardHeader>
               <Separator />
               <CardContent className="pt-4">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  className="prose prose-sm dark:prose-invert max-w-none"
-                >
-                  {insight.content}
-                </ReactMarkdown>
+                <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {insight.content}
+                  </ReactMarkdown>
+                </div>
               </CardContent>
             </Card>
           ))
