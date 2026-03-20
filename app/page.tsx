@@ -75,17 +75,21 @@ async function DashboardContent() {
   const categoryMap: Record<string, number> = {};
   for (const t of allTxns ?? []) {
     if (t.direction !== "debit") continue;
-    const cat = t.user_category_override ?? t.redbark_category ?? "Other";
+    // Prefer AI categories for the dashboard chart.
+    const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category ?? "Other";
     if (cat === "Transfers") continue;
     categoryMap[cat] = (categoryMap[cat] ?? 0) + Math.abs(t.amount_cents);
   }
-  spendingByCategory = Object.entries(categoryMap)
-    .sort((a, b) => b[1] - a[1])
-    .map(([name, value]) => ({
-      name,
-      value,
-      color: CATEGORY_COLORS[name] ?? "#888780",
-    }));
+  const sortedCategories = Object.entries(categoryMap).sort((a, b) => b[1] - a[1]);
+  spendingByCategory = sortedCategories.map(([name, value], idx) => ({
+    name,
+    value,
+    // Ensure each category gets a distinct color, even when the name
+    // isn't present in `CATEGORY_COLORS`.
+    color:
+      CATEGORY_COLORS[name] ??
+      `hsl(${(idx * 47) % 360} 75% 55%)`,
+  }));
 
   const monthlyData: Record<string, { income: number; spending: number }> = {};
   for (const t of allTxns ?? []) {
