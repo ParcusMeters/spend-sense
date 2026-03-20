@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { generateDigest } from "@/lib/ai/digest";
 import { getCurrentWeek } from "@/lib/utils/dates";
+import { sendDigestEmail } from "@/lib/email/send";
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -30,5 +31,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ status: "ok", insight_id: data.id });
+  const email = await sendDigestEmail({
+    subject: `Weekly Digest — ${start} to ${end}`,
+    markdown: result.content,
+    period: { start, end },
+  });
+
+  return NextResponse.json({ status: "ok", insight_id: data.id, email });
 }

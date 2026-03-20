@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { generateDigest } from "@/lib/ai/digest";
+import { sendDigestEmail } from "@/lib/email/send";
 import { format, subMonths, startOfMonth, endOfMonth } from "date-fns";
 
 export async function GET(request: NextRequest) {
@@ -12,6 +13,7 @@ export async function GET(request: NextRequest) {
   const lastMonth = subMonths(new Date(), 1);
   const start = format(startOfMonth(lastMonth), "yyyy-MM-dd");
   const end = format(endOfMonth(lastMonth), "yyyy-MM-dd");
+  const monthLabel = format(lastMonth, "MMMM yyyy");
 
   const result = await generateDigest("monthly", start, end);
   const supabase = createServiceClient();
@@ -48,5 +50,11 @@ export async function GET(request: NextRequest) {
     { onConflict: "month" }
   );
 
-  return NextResponse.json({ status: "ok", insight_id: insight?.id });
+  const email = await sendDigestEmail({
+    subject: `Monthly Report — ${monthLabel}`,
+    markdown: result.content,
+    period: { start, end },
+  });
+
+  return NextResponse.json({ status: "ok", insight_id: insight?.id, email });
 }
