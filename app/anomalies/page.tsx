@@ -8,6 +8,18 @@ import { formatDate } from "@/lib/utils/dates";
 import { formatCurrency } from "@/lib/utils/currency";
 import { AnomalyBadge } from "@/components/transactions/AnomalyBadge";
 
+interface TxnForAnomalies {
+  id: string;
+  date: string;
+  description: string;
+  merchant: string | null;
+  amount_cents: number;
+  direction: "debit" | "credit";
+  ai_category: string | null;
+  user_category_override: string | null;
+  redbark_category: string | null;
+}
+
 function getEffectiveCategory(t: {
   user_category_override: string | null;
   ai_category: string | null;
@@ -44,8 +56,10 @@ async function AnomaliesContent() {
     )
     .in("id", transactionIds);
 
-  const txnById = new Map<string, (typeof txns)[number]>();
-  for (const t of txns ?? []) txnById.set(t.id, t);
+  const txnById = new Map<string, TxnForAnomalies>();
+  for (const t of (txns ?? []) as TxnForAnomalies[]) {
+    txnById.set(t.id, t);
+  }
 
   return (
     <div className="space-y-6">
