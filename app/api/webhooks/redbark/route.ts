@@ -161,10 +161,11 @@ async function processAIAsync(
     txCount: newTransactions.length,
     insertedIdsCount: insertedIds.length,
   });
-  // Batch categorise (up to 20 at a time)
+  // Batch categorise (up to 10 at a time)
   const batches = [];
-  for (let i = 0; i < newTransactions.length; i += 20) {
-    batches.push(newTransactions.slice(i, i + 20));
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < newTransactions.length; i += BATCH_SIZE) {
+    batches.push(newTransactions.slice(i, i + BATCH_SIZE));
   }
   console.log("AI webhook batches prepared", { batchCount: batches.length });
 

@@ -55,88 +55,39 @@ export async function categoriseTransactions(
     )
     .join("\n");
 
-  const structuredPrompt = `Categorise these Australian bank transactions.
-
-For each transaction, you MUST return:
-- category: one of the categories provided
-- confidence: number between 0 and 1
-- is_recurring: true/false
-- merchant_clean: cleaned merchant name string (can be same as input merchant)
-
-Categories: ${CATEGORIES.join(", ")}
-
-Transactions:
-${txnList}
-
-Return ONLY valid JSON. No markdown, no explanations.
-Use this exact shape:
-{"results":[{"redbark_id":"...","category":"...","confidence":0.95,"is_recurring":false,"merchant_clean":"..."}]}`;
-
   const plainPrompt = `Categorise these Australian bank transactions.
 
-For each transaction, you MUST return:
-- category: one of the categories provided
-- confidence: number between 0 and 1
-- is_recurring: true/false
-- merchant_clean: cleaned merchant name string (can be same as input merchant)
+Return ONLY a single JSON array. The first character MUST be '[' and the last character MUST be ']'.
+No markdown, no code fences, no explanation text.
 
-Categories: ${CATEGORIES.join(", ")}
+For each transaction, return an object with EXACT keys:
+{"redbark_id","category","confidence","is_recurring","merchant_clean"}
+
+Rules:
+- category must be one of: ${CATEGORIES.join(", ")}
+- confidence is a number from 0 to 1
+- is_recurring is true or false
+- merchant_clean must be a single line string (no newlines), max 40 chars, and must NOT include quotation marks
 
 Transactions:
-${txnList}
-
-Return ONLY valid JSON array. No markdown, no explanations.
-[{"redbark_id":"...","category":"...","confidence":0.95,"is_recurring":false,"merchant_clean":"..."}]`;
+${txnList}`;
 
   let message;
   try {
-    // First attempt: structured outputs.
     message = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
+      max_tokens: 4096,
+      temperature: 0,
       messages: [
         {
           role: "user",
-          content: structuredPrompt,
+          content: plainPrompt,
         },
       ],
-      output_config: {
-        format: {
-          type: "json_schema",
-          schema: {
-            type: "object",
-            properties: {
-              results: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    redbark_id: { type: "string" },
-                    category: { type: "string" },
-                    confidence: { type: "number" },
-                    is_recurring: { type: "boolean" },
-                    merchant_clean: { type: "string" },
-                  },
-                  required: [
-                    "redbark_id",
-                    "category",
-                    "confidence",
-                    "is_recurring",
-                    "merchant_clean",
-                  ],
-                  additionalProperties: false,
-                },
-              },
-            },
-            required: ["results"],
-            additionalProperties: false,
-          },
-        },
-      },
     });
   } catch (error) {
     const e = error as any;
-    console.warn("AI categorise structured output failed; retrying plain JSON", {
+    console.error("AI categorise request failed", {
       count: transactions.length,
       aiRunId: ctx?.aiRunId,
       batchIndex: ctx?.batchIndex,
@@ -146,32 +97,7 @@ Return ONLY valid JSON array. No markdown, no explanations.
       code: e?.code ?? e?.response?.data?.code,
       responseData: e?.response?.data ?? null,
     });
-
-    try {
-      message = await anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
-        messages: [
-          {
-            role: "user",
-            content: plainPrompt,
-          },
-        ],
-      });
-    } catch (error2) {
-      const e2 = error2 as any;
-      console.error("AI categorise request failed (plain retry)", {
-        count: transactions.length,
-        aiRunId: ctx?.aiRunId,
-        batchIndex: ctx?.batchIndex,
-        sampleIds: transactions.map((t) => t.redbark_id).slice(0, 3),
-        message: e2?.message,
-        status: e2?.status ?? e2?.response?.status,
-        code: e2?.code ?? e2?.response?.data?.code,
-        responseData: e2?.response?.data ?? null,
-      });
-      return [];
-    }
+    return [];
   }
 
   console.log("AI categorise response received", {
@@ -185,8 +111,6 @@ Return ONLY valid JSON array. No markdown, no explanations.
     | undefined;
   const text = textBlock?.text ?? "";
 
-  // Structured outputs should already produce strict JSON, but we still
-  // harden parsing against accidental markdown/code fences.
   const cleaned = text
     .trim()
     .replace(/```(?:json)?/g, "")
@@ -194,17 +118,19 @@ Return ONLY valid JSON array. No markdown, no explanations.
     .trim();
 
   try {
-    const parsed = JSON.parse(cleaned) as
-      | CategorisationResult[]
-      | { results: CategorisationResult[] };
+    const start = cleaned.indexOf("[");
+    const end = cleaned.lastIndexOf("]");
+    const jsonCandidate =
+      start !== -1 && end !== -1 && end > start ? cleaned.slice(start, end + 1) : cleaned;
 
-    const results = Array.isArray(parsed) ? parsed : parsed.results;
+    const parsed = JSON.parse(jsonCandidate) as unknown;
+    const results = Array.isArray(parsed) ? parsed : [];
     if (!Array.isArray(results)) return [];
 
     // Coerce primitive types because models sometimes return numbers/booleans
     // as strings (e.g. "0.83", "true"). If coercion fails, drop the item.
     const normalised: CategorisationResult[] = [];
-    for (const r of results) {
+    for (const r of results as any[]) {
       const redbark_id = String((r as any).redbark_id ?? "").trim();
       const category = String((r as any).category ?? "").trim();
       const merchant_clean = String((r as any).merchant_clean ?? "").trim();
