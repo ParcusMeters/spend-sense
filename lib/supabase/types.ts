@@ -40,6 +40,7 @@ export interface Transaction {
   is_recurring: boolean;
   is_anomaly: boolean;
   anomaly_reason: string | null;
+  ai_status: "pending" | "processing" | "done" | "failed";
   post_date: string | null;
   raw_data: Record<string, unknown> | null;
   created_at: string;

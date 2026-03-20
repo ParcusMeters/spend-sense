@@ -32,7 +32,7 @@ export function AskFinances() {
   }, []);
 
   useEffect(() => {
-    scrollToBottom();
+    if (messages.length > 0) scrollToBottom();
   }, [messages, scrollToBottom]);
 
   async function sendMessage(text?: string) {
