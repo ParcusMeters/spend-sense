@@ -69,6 +69,14 @@ Rules:
 - is_recurring is true or false
 - merchant_clean must be a single line string (no newlines), max 40 chars, and must NOT include quotation marks
 
+Recurring detection rule (important):
+- Set is_recurring = true ONLY when this looks like a subscription you have signed up for.
+- It should show a regular billing cadence consistent with either:
+  - weekly-ish (about every 7 +/- 2 days), or
+  - monthly-ish (about every 30 +/- 5 days),
+  AND it should look like a service/plan (e.g. streaming, utilities, memberships).
+- If it looks like general repeated spending (groceries, dining, transport) or it is irregular/uncertain, set is_recurring = false.
+
 Transactions:
 ${txnList}`;
 
