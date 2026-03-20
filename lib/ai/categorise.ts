@@ -54,29 +54,76 @@ export async function categoriseTransactions(
 
   let message;
   try {
+    // Use structured outputs (JSON schema) to avoid "almost JSON" responses.
+    // We wrap the results in an object `{ results: [...] }` for schema stability,
+    // then we return just the array to the rest of the app.
     message = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1024,
       messages: [
         {
           role: "user",
-          content: `Categorise these Australian bank transactions. For each, return the category, confidence (0-1), whether it's recurring, and a cleaned merchant name.
+          content: `Categorise these Australian bank transactions.
+
+For each transaction, you MUST return:
+- category: one of the categories provided
+- confidence: number between 0 and 1
+- is_recurring: true/false
+- merchant_clean: cleaned merchant name string (can be same as input merchant)
 
 Categories: ${CATEGORIES.join(", ")}
 
 Transactions:
 ${txnList}
 
-Reply with ONLY a JSON array:
-[{"redbark_id":"...","category":"...","confidence":0.95,"is_recurring":false,"merchant_clean":"..."}]`,
+Return ONLY valid JSON. No markdown, no explanations.
+Use this exact shape:
+{"results":[{"redbark_id":"...","category":"...","confidence":0.95,"is_recurring":false,"merchant_clean":"..."}]}`,
         },
       ],
+      output_config: {
+        format: {
+          type: "json_schema",
+          schema: {
+            type: "object",
+            properties: {
+              results: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    redbark_id: { type: "string" },
+                    category: { type: "string" },
+                    confidence: { type: "number" },
+                    is_recurring: { type: "boolean" },
+                    merchant_clean: { type: "string" },
+                  },
+                  required: [
+                    "redbark_id",
+                    "category",
+                    "confidence",
+                    "is_recurring",
+                    "merchant_clean",
+                  ],
+                  additionalProperties: false,
+                },
+              },
+            },
+            required: ["results"],
+            additionalProperties: false,
+          },
+        },
+      },
     });
   } catch (error) {
+    const e = error as any;
     console.error("AI categorise request failed", {
       count: transactions.length,
       sampleIds: transactions.map((t) => t.redbark_id).slice(0, 3),
-      error: String(error),
+      message: e?.message,
+      status: e?.status ?? e?.response?.status,
+      code: e?.code ?? e?.response?.data?.code,
+      responseData: e?.response?.data ?? null,
     });
     return [];
   }
@@ -92,27 +139,50 @@ Reply with ONLY a JSON array:
     | undefined;
   const text = textBlock?.text ?? "";
 
-  const jsonMatch = text.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) {
-    console.warn("categoriseTransactions: no JSON array found", {
-      ids: transactions.map((t) => t.redbark_id).slice(0, 3),
-      textLength: text.length,
-    });
-    return [];
-  }
+  // Structured outputs should already produce strict JSON, but we still
+  // harden parsing against accidental markdown/code fences.
+  const cleaned = text
+    .trim()
+    .replace(/```(?:json)?/g, "")
+    .replace(/```/g, "")
+    .trim();
 
   try {
-    const parsed = JSON.parse(jsonMatch[0]) as CategorisationResult[];
+    const parsed = JSON.parse(cleaned) as
+      | CategorisationResult[]
+      | { results: CategorisationResult[] };
+
+    const results = Array.isArray(parsed) ? parsed : parsed.results;
+    if (!Array.isArray(results)) return [];
+
+    // Basic shape validation + confidence bounds
+    const normalised = results
+      .filter(
+        (r) =>
+          typeof r.redbark_id === "string" &&
+          typeof r.category === "string" &&
+          typeof r.merchant_clean === "string" &&
+          typeof r.confidence === "number" &&
+          typeof r.is_recurring === "boolean",
+      )
+      .map((r) => ({
+        ...r,
+        confidence: Math.max(0, Math.min(1, r.confidence)),
+      }));
+
     console.log("AI categorise parsed", {
       requested: transactions.length,
-      parsed: parsed.length,
+      parsed: normalised.length,
       elapsedMs: Date.now() - startedAt,
     });
-    return parsed;
+
+    return normalised;
   } catch (err) {
     console.warn("categoriseTransactions: JSON parse failed", {
       ids: transactions.map((t) => t.redbark_id).slice(0, 3),
+      textLength: text.length,
       error: String(err),
+      cleanedPreview: cleaned.slice(0, 300),
     });
     return [];
   }

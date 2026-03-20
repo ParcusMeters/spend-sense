@@ -82,14 +82,70 @@ Write in a friendly but professional tone. Use markdown formatting. Be specific 
       messages: [{ role: "user", content: prompt }],
     });
   } catch (error) {
+    const e = error as any;
     console.error("AI digest request failed", {
       type,
       startDate,
       endDate,
       txCount: transactions.length,
-      error: String(error),
+      message: e?.message,
+      status: e?.status ?? e?.response?.status,
+      code: e?.code ?? e?.response?.data?.code,
+      responseData: e?.response?.data ?? null,
     });
-    throw error;
+    // If Anthropic billing/credits are unavailable, fall back to a deterministic digest
+    // so the endpoint doesn't 500.
+    const incomeDollars = (totalIncome / 100).toFixed(2);
+    const spendingDollars = (totalSpending / 100).toFixed(2);
+    const netSavedDollars = ((totalIncome - totalSpending) / 100).toFixed(2);
+    const typeLabel =
+      type === "weekly" ? "Weekly" : type === "monthly" ? "Monthly" : "On-demand";
+
+    const topCategoryLines = topCategories
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const topCategoryBullets =
+      topCategoryLines.length > 0
+        ? topCategoryLines.map((l) => `- ${l}`).join("\n")
+        : "- None";
+
+    const fallbackContent = `## ${typeLabel} Financial Digest
+
+Period: ${startDate} to ${endDate}
+Total income: $${incomeDollars}
+Total spending: $${spendingDollars}
+Net saved: $${netSavedDollars}
+
+Top spending categories:
+${topCategoryBullets}
+
+Flagged anomalies: ${anomalyCount}
+
+Next steps:
+- Review your top categories and consider setting/adjusting budgets.
+- Double-check any flagged anomalies and ensure recurring charges are expected.
+- If spending spikes, look for changes in recurring merchants.`;
+
+    const fallbackSummary =
+      fallbackContent
+        .split("\n")
+        .find((l) => l.trim().length > 0)
+        ?.replace(/^#+\s*/, "")
+        .slice(0, 200) ?? "Financial digest";
+
+    return {
+      content: fallbackContent,
+      summary: fallbackSummary,
+      data: {
+        total_income: totalIncome,
+        total_spending: totalSpending,
+        net_saved: totalIncome - totalSpending,
+        transaction_count: transactions.length,
+        category_breakdown: categoryTotals,
+        anomaly_count: anomalyCount,
+      },
+    };
   }
 
   console.log("AI digest response received", {
