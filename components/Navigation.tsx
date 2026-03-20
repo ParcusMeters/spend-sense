@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   ArrowRightLeft,
   Brain,
+  AlertTriangle,
   TrendingUp,
   Wallet,
   Menu,
@@ -22,6 +23,7 @@ const links = [
   { href: "/recurring", label: "Recurring", icon: Repeat },
   { href: "/projections", label: "Projections", icon: TrendingUp },
   { href: "/insights", label: "Insights", icon: Brain },
+  { href: "/anomalies", label: "Anomalies", icon: AlertTriangle },
 ];
 
 export function Navigation() {
