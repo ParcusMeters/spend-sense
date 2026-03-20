@@ -8,6 +8,13 @@ export async function generateDigest(
   startDate: string,
   endDate: string
 ): Promise<{ content: string; summary: string; data: Record<string, unknown> }> {
+  const startedAt = Date.now();
+  console.log("AI digest start", {
+    type,
+    startDate,
+    endDate,
+    hasApiKey: Boolean(process.env.ANTHROPIC_API_KEY),
+  });
   const supabase = createServiceClient();
 
   const { data: transactions } = await supabase
@@ -18,6 +25,7 @@ export async function generateDigest(
     .order("date", { ascending: false });
 
   if (!transactions || transactions.length === 0) {
+    console.log("AI digest skipped: no transactions", { type, startDate, endDate });
     return {
       content: "No transactions found for this period.",
       summary: "No activity",
@@ -66,10 +74,30 @@ ${type === "ad_hoc" ? "Provide an analytical summary of this period with key ins
 
 Write in a friendly but professional tone. Use markdown formatting. Be specific with numbers. Marcus earns ~$5,841/month net and aims for a $20,000 savings goal.`;
 
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 2048,
-    messages: [{ role: "user", content: prompt }],
+  let message;
+  try {
+    message = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 2048,
+      messages: [{ role: "user", content: prompt }],
+    });
+  } catch (error) {
+    console.error("AI digest request failed", {
+      type,
+      startDate,
+      endDate,
+      txCount: transactions.length,
+      error: String(error),
+    });
+    throw error;
+  }
+
+  console.log("AI digest response received", {
+    type,
+    txCount: transactions.length,
+    elapsedMs: Date.now() - startedAt,
+    contentBlocks: message.content.length,
+    stopReason: message.stop_reason,
   });
 
   const content = message.content[0].type === "text" ? message.content[0].text : "";

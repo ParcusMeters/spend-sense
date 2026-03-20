@@ -38,6 +38,12 @@ export async function categoriseTransactions(
   }[]
 ): Promise<CategorisationResult[]> {
   if (transactions.length === 0) return [];
+  const startedAt = Date.now();
+  console.log("AI categorise start", {
+    count: transactions.length,
+    sampleIds: transactions.map((t) => t.redbark_id).slice(0, 3),
+    hasApiKey: Boolean(process.env.ANTHROPIC_API_KEY),
+  });
 
   const txnList = transactions
     .map(
@@ -46,13 +52,15 @@ export async function categoriseTransactions(
     )
     .join("\n");
 
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 1024,
-    messages: [
-      {
-        role: "user",
-        content: `Categorise these Australian bank transactions. For each, return the category, confidence (0-1), whether it's recurring, and a cleaned merchant name.
+  let message;
+  try {
+    message = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "user",
+          content: `Categorise these Australian bank transactions. For each, return the category, confidence (0-1), whether it's recurring, and a cleaned merchant name.
 
 Categories: ${CATEGORIES.join(", ")}
 
@@ -61,8 +69,22 @@ ${txnList}
 
 Reply with ONLY a JSON array:
 [{"redbark_id":"...","category":"...","confidence":0.95,"is_recurring":false,"merchant_clean":"..."}]`,
-      },
-    ],
+        },
+      ],
+    });
+  } catch (error) {
+    console.error("AI categorise request failed", {
+      count: transactions.length,
+      sampleIds: transactions.map((t) => t.redbark_id).slice(0, 3),
+      error: String(error),
+    });
+    return [];
+  }
+
+  console.log("AI categorise response received", {
+    elapsedMs: Date.now() - startedAt,
+    contentBlocks: message.content.length,
+    stopReason: message.stop_reason,
   });
 
   const textBlock = message.content.find((c) => c.type === "text") as
@@ -80,7 +102,13 @@ Reply with ONLY a JSON array:
   }
 
   try {
-    return JSON.parse(jsonMatch[0]) as CategorisationResult[];
+    const parsed = JSON.parse(jsonMatch[0]) as CategorisationResult[];
+    console.log("AI categorise parsed", {
+      requested: transactions.length,
+      parsed: parsed.length,
+      elapsedMs: Date.now() - startedAt,
+    });
+    return parsed;
   } catch (err) {
     console.warn("categoriseTransactions: JSON parse failed", {
       ids: transactions.map((t) => t.redbark_id).slice(0, 3),

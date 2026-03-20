@@ -132,11 +132,17 @@ async function processAIAsync(
   newTransactions: RedbarkWebhookPayload["data"]["new"],
   insertedIds: string[]
 ) {
+  const startedAt = Date.now();
+  console.log("AI webhook processing start", {
+    txCount: newTransactions.length,
+    insertedIdsCount: insertedIds.length,
+  });
   // Batch categorise (up to 20 at a time)
   const batches = [];
   for (let i = 0; i < newTransactions.length; i += 20) {
     batches.push(newTransactions.slice(i, i + 20));
   }
+  console.log("AI webhook batches prepared", { batchCount: batches.length });
 
   for (const batch of batches) {
     const toCateg = batch.map((t) => ({
@@ -206,4 +212,9 @@ async function processAIAsync(
       }
     }
   }
+  console.log("AI webhook processing complete", {
+    txCount: newTransactions.length,
+    batchCount: batches.length,
+    elapsedMs: Date.now() - startedAt,
+  });
 }
