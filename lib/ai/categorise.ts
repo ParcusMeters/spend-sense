@@ -68,6 +68,7 @@ Rules:
 - confidence is a number from 0 to 1
 - is_recurring is true or false
 - merchant_clean must be a single line string (no newlines), max 40 chars, and must NOT include quotation marks
+- any transaction with transaction details including "Revolut" should be set to category "Travel"
 
 Recurring detection rule (important):
 - Set is_recurring = true ONLY when this looks like a subscription you have signed up for.
