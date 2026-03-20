@@ -12,6 +12,7 @@ import { formatDate } from "@/lib/utils/dates";
 import type { Insight } from "@/lib/supabase/types";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { AskFinances } from "@/components/insights/AskFinances";
 
 interface InsightsClientProps {
   insights: Insight[];
@@ -61,6 +62,8 @@ export function InsightsClient({ insights: initialInsights }: InsightsClientProp
           AI-powered analysis of your spending patterns
         </p>
       </div>
+
+      <AskFinances />
 
       <Card>
         <CardHeader>
