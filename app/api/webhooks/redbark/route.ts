@@ -4,6 +4,7 @@ import { RedbarkWebhookPayload } from "@/lib/redbark/types";
 import { createServiceClient } from "@/lib/supabase/server";
 import { categoriseTransactions } from "@/lib/ai/categorise";
 import { detectAnomalies } from "@/lib/ai/anomaly";
+import { randomUUID } from "crypto";
 
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
@@ -24,6 +25,8 @@ export async function POST(request: NextRequest) {
 
   const supabase = createServiceClient();
   console.log("Redbark webhook transactions.synced", {
+    deliveryId,
+    syncRunId: payload.metadata.sync_run_id,
     newCount: payload.data.new.length,
     updatedCount: payload.data.updated.length,
   });
@@ -118,10 +121,27 @@ export async function POST(request: NextRequest) {
     chunk: `${payload.metadata.chunk}/${payload.metadata.total_chunks}`,
   });
 
-  // Fire and forget: AI categorisation + anomaly detection
+  // Ensure AI work actually completes (important on Vercel).
+  // If we "fire and forget", the serverless runtime may terminate early.
+  const aiRunId = randomUUID();
   const aiTransactions = [...payload.data.new, ...payload.data.updated];
   if (aiTransactions.length > 0) {
-    processAIAsync(supabase, aiTransactions, insertedIds).catch(console.error);
+    try {
+      await processAIAsync(supabase, aiTransactions, insertedIds, aiRunId, payload.metadata.sync_run_id);
+    } catch (error) {
+      console.error("AI webhook processing failed", {
+        aiRunId,
+        deliveryId,
+        syncRunId: payload.metadata.sync_run_id,
+        error: String(error),
+      });
+    }
+  } else {
+    console.log("AI webhook skipped: no transactions", {
+      aiRunId,
+      deliveryId,
+      syncRunId: payload.metadata.sync_run_id,
+    });
   }
 
   return response;
@@ -130,10 +150,14 @@ export async function POST(request: NextRequest) {
 async function processAIAsync(
   supabase: ReturnType<typeof createServiceClient>,
   newTransactions: RedbarkWebhookPayload["data"]["new"],
-  insertedIds: string[]
+  insertedIds: string[],
+  aiRunId: string,
+  syncRunId: string
 ) {
   const startedAt = Date.now();
   console.log("AI webhook processing start", {
+    aiRunId,
+    syncRunId,
     txCount: newTransactions.length,
     insertedIdsCount: insertedIds.length,
   });
@@ -144,7 +168,8 @@ async function processAIAsync(
   }
   console.log("AI webhook batches prepared", { batchCount: batches.length });
 
-  for (const batch of batches) {
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batch = batches[batchIndex];
     const toCateg = batch.map((t) => ({
       redbark_id: t.id,
       description: t.description,
@@ -154,13 +179,26 @@ async function processAIAsync(
       redbark_category: t.category,
     }));
 
-    const results = await categoriseTransactions(toCateg);
+    console.log("AI categorise batch start", {
+      aiRunId,
+      batchIndex,
+      batchSize: toCateg.length,
+    });
+
+    const results = await categoriseTransactions(toCateg, {
+      aiRunId,
+      batchIndex,
+    });
     if (results.length === 0) {
       console.warn("AI categorisation returned no results", {
+        aiRunId,
+        batchIndex,
         ids: toCateg.map((t) => t.redbark_id).slice(0, 3),
       });
     }
 
+    let updatedOk = 0;
+    let updatedMatched0 = 0;
     for (const result of results) {
       const { data: updatedRows, error: updateError } = await supabase
         .from("transactions")
@@ -175,14 +213,22 @@ async function processAIAsync(
 
       if (updateError) {
         console.error("AI update failed", {
+          aiRunId,
+          batchIndex,
           redbark_id: result.redbark_id,
           error: updateError,
         });
       }
       if (!updateError && (!updatedRows || updatedRows.length === 0)) {
+        updatedMatched0 += 1;
         console.warn("AI update matched 0 rows", {
+          aiRunId,
+          batchIndex,
           redbark_id: result.redbark_id,
         });
+      }
+      if (!updateError && updatedRows && updatedRows.length > 0) {
+        updatedOk += 1;
       }
 
       // Anomaly detection
@@ -211,8 +257,17 @@ async function processAIAsync(
         }
       }
     }
+
+    console.log("AI categorise batch complete", {
+      aiRunId,
+      batchIndex,
+      resultsCount: results.length,
+      updatedOk,
+      updatedMatched0,
+    });
   }
   console.log("AI webhook processing complete", {
+    aiRunId,
     txCount: newTransactions.length,
     batchCount: batches.length,
     elapsedMs: Date.now() - startedAt,

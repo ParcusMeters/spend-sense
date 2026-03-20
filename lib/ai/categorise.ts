@@ -35,11 +35,14 @@ export async function categoriseTransactions(
     direction: string;
     merchant: string | null;
     redbark_category: string | null;
-  }[]
+  }[],
+  ctx?: { aiRunId?: string; batchIndex?: number }
 ): Promise<CategorisationResult[]> {
   if (transactions.length === 0) return [];
   const startedAt = Date.now();
   console.log("AI categorise start", {
+    aiRunId: ctx?.aiRunId,
+    batchIndex: ctx?.batchIndex,
     count: transactions.length,
     sampleIds: transactions.map((t) => t.redbark_id).slice(0, 3),
     hasApiKey: Boolean(process.env.ANTHROPIC_API_KEY),
@@ -52,18 +55,7 @@ export async function categoriseTransactions(
     )
     .join("\n");
 
-  let message;
-  try {
-    // Use structured outputs (JSON schema) to avoid "almost JSON" responses.
-    // We wrap the results in an object `{ results: [...] }` for schema stability,
-    // then we return just the array to the rest of the app.
-    message = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
-      messages: [
-        {
-          role: "user",
-          content: `Categorise these Australian bank transactions.
+  const structuredPrompt = `Categorise these Australian bank transactions.
 
 For each transaction, you MUST return:
 - category: one of the categories provided
@@ -78,7 +70,34 @@ ${txnList}
 
 Return ONLY valid JSON. No markdown, no explanations.
 Use this exact shape:
-{"results":[{"redbark_id":"...","category":"...","confidence":0.95,"is_recurring":false,"merchant_clean":"..."}]}`,
+{"results":[{"redbark_id":"...","category":"...","confidence":0.95,"is_recurring":false,"merchant_clean":"..."}]}`;
+
+  const plainPrompt = `Categorise these Australian bank transactions.
+
+For each transaction, you MUST return:
+- category: one of the categories provided
+- confidence: number between 0 and 1
+- is_recurring: true/false
+- merchant_clean: cleaned merchant name string (can be same as input merchant)
+
+Categories: ${CATEGORIES.join(", ")}
+
+Transactions:
+${txnList}
+
+Return ONLY valid JSON array. No markdown, no explanations.
+[{"redbark_id":"...","category":"...","confidence":0.95,"is_recurring":false,"merchant_clean":"..."}]`;
+
+  let message;
+  try {
+    // First attempt: structured outputs.
+    message = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "user",
+          content: structuredPrompt,
         },
       ],
       output_config: {
@@ -117,15 +136,42 @@ Use this exact shape:
     });
   } catch (error) {
     const e = error as any;
-    console.error("AI categorise request failed", {
+    console.warn("AI categorise structured output failed; retrying plain JSON", {
       count: transactions.length,
+      aiRunId: ctx?.aiRunId,
+      batchIndex: ctx?.batchIndex,
       sampleIds: transactions.map((t) => t.redbark_id).slice(0, 3),
       message: e?.message,
       status: e?.status ?? e?.response?.status,
       code: e?.code ?? e?.response?.data?.code,
       responseData: e?.response?.data ?? null,
     });
-    return [];
+
+    try {
+      message = await anthropic.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1024,
+        messages: [
+          {
+            role: "user",
+            content: plainPrompt,
+          },
+        ],
+      });
+    } catch (error2) {
+      const e2 = error2 as any;
+      console.error("AI categorise request failed (plain retry)", {
+        count: transactions.length,
+        aiRunId: ctx?.aiRunId,
+        batchIndex: ctx?.batchIndex,
+        sampleIds: transactions.map((t) => t.redbark_id).slice(0, 3),
+        message: e2?.message,
+        status: e2?.status ?? e2?.response?.status,
+        code: e2?.code ?? e2?.response?.data?.code,
+        responseData: e2?.response?.data ?? null,
+      });
+      return [];
+    }
   }
 
   console.log("AI categorise response received", {
@@ -155,20 +201,38 @@ Use this exact shape:
     const results = Array.isArray(parsed) ? parsed : parsed.results;
     if (!Array.isArray(results)) return [];
 
-    // Basic shape validation + confidence bounds
-    const normalised = results
-      .filter(
-        (r) =>
-          typeof r.redbark_id === "string" &&
-          typeof r.category === "string" &&
-          typeof r.merchant_clean === "string" &&
-          typeof r.confidence === "number" &&
-          typeof r.is_recurring === "boolean",
-      )
-      .map((r) => ({
-        ...r,
-        confidence: Math.max(0, Math.min(1, r.confidence)),
-      }));
+    // Coerce primitive types because models sometimes return numbers/booleans
+    // as strings (e.g. "0.83", "true"). If coercion fails, drop the item.
+    const normalised: CategorisationResult[] = [];
+    for (const r of results) {
+      const redbark_id = String((r as any).redbark_id ?? "").trim();
+      const category = String((r as any).category ?? "").trim();
+      const merchant_clean = String((r as any).merchant_clean ?? "").trim();
+
+      const confidenceRaw = (r as any).confidence;
+      const confidenceNum = typeof confidenceRaw === "number"
+        ? confidenceRaw
+        : Number(confidenceRaw);
+
+      const isRecurringRaw = (r as any).is_recurring;
+      const is_recurring =
+        typeof isRecurringRaw === "boolean"
+          ? isRecurringRaw
+          : typeof isRecurringRaw === "string"
+            ? ["true", "t", "1", "yes"].includes(isRecurringRaw.toLowerCase())
+            : false;
+
+      if (!redbark_id || !category || !merchant_clean) continue;
+      if (!Number.isFinite(confidenceNum)) continue;
+
+      normalised.push({
+        redbark_id,
+        category,
+        confidence: Math.max(0, Math.min(1, confidenceNum)),
+        is_recurring,
+        merchant_clean,
+      });
+    }
 
     console.log("AI categorise parsed", {
       requested: transactions.length,
@@ -180,6 +244,8 @@ Use this exact shape:
   } catch (err) {
     console.warn("categoriseTransactions: JSON parse failed", {
       ids: transactions.map((t) => t.redbark_id).slice(0, 3),
+      aiRunId: ctx?.aiRunId,
+      batchIndex: ctx?.batchIndex,
       textLength: text.length,
       error: String(err),
       cleanedPreview: cleaned.slice(0, 300),
