@@ -126,8 +126,20 @@ async function detectAnomaliesAi(
   if (!txnRow) return [];
 
   const currentMerchant = merchant ?? txnRow.merchant ?? null;
+  const currentDescription = String(txnRow.description ?? "");
   const absAmount = Math.abs(amountCents);
   const absAmountDollars = (absAmount / 100).toFixed(2);
+
+  // Overseas / international keywords are a noisy signal, but it is a
+  // strong "context" indicator for fraud-like anomalies.
+  // This intentionally errs on the side of being conservative.
+  const overseasLikely =
+    /(^|[^a-z])(intl|international|overseas|swift|wire|remittance)([^a-z]|$)/i.test(
+      `${currentMerchant ?? ""} ${currentDescription}`,
+    ) ||
+    /(\btransferwise\b|\brevolut\b|\bwise\b)/i.test(
+      `${currentMerchant ?? ""} ${currentDescription}`,
+    );
 
   // Evidence: duplicates
   const { data: dupes } = currentMerchant
@@ -198,7 +210,10 @@ async function detectAnomaliesAi(
       .neq("id", transactionId)
       .limit(1);
 
-    unusualMerchantLikely = !seen || seen.length === 0;
+    // "New merchant" alone is too sensitive; only treat as anomalous when
+    // there's also unusual spend size OR overseas context.
+    unusualMerchantLikely =
+      (!seen || seen.length === 0) && (unusualAmountLikely || overseasLikely);
   }
 
   // Evidence: unusual_time (unusual day-of-week for this account)
@@ -216,7 +231,12 @@ async function detectAnomaliesAi(
   );
   const dowCount = recentDows.filter((d) => d === dayOfWeek).length;
   const dowTotal = recentDows.length;
-  const unusualTimeLikely = dowTotal > 0 ? dowCount / dowTotal < 0.08 : false;
+  // "Unusual day-of-week" alone is too sensitive; require unusual spend
+  // size OR overseas context.
+  const unusualTimeLikely =
+    dowTotal > 0 ? dowCount / dowTotal < 0.08 : false;
+  const unusualTimeStrongLikely =
+    unusualTimeLikely && (unusualAmountLikely || overseasLikely);
 
   const prompt = `You are an anomaly detection assistant for personal finance.
 Decide which of the following anomaly types apply to the CURRENT transaction.
@@ -236,7 +256,7 @@ EVIDENCE / signals (may be noisy):
 - unusualAmountLikely: ${unusualAmountLikely}
 - subscriptionChangeLikely: ${subscriptionChangeLikely}
 - unusualMerchantLikely: ${unusualMerchantLikely}
-- unusualTimeLikely: ${unusualTimeLikely}
+- unusualTimeStrongLikely: ${unusualTimeStrongLikely}
 
 Notes:
 - If the corresponding Likely flag is false, you should usually return no anomaly of that type.
@@ -293,6 +313,13 @@ Return an empty array [] if nothing looks anomalous.`;
     if (!allowedTypes.includes(type as AnomalyType)) continue;
     if (!allowedSeverities.includes(severity as AnomalyResult["severity"])) continue;
     if (!description) continue;
+
+    // Post-filter to reduce sensitivity:
+    // - "new merchant" (unusual_merchant) must be backed by unusual amount
+    //   and/or overseas context (we incorporate that into unusualMerchantLikely).
+    // - "unusual day-of-week" (unusual_time) must also be backed by the same strong evidence.
+    if (type === "unusual_merchant" && !unusualMerchantLikely) continue;
+    if (type === "unusual_time" && !unusualTimeStrongLikely) continue;
 
     normalised.push({
       transaction_id: txId,
