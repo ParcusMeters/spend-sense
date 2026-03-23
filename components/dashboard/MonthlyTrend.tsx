@@ -51,7 +51,11 @@ function MonthlyTrendTooltip({ active, label, payload }: TrendTooltipProps) {
               {String(p.name)}
             </span>
             <span className="font-medium">
-              ${Number(p.value ?? 0).toLocaleString("en-AU", { minimumFractionDigits: 2 })}
+              $
+              {(Number(p.value ?? 0) / 100).toLocaleString("en-AU", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
             </span>
           </div>
         ))}
@@ -124,7 +128,7 @@ export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
                 <XAxis
                   dataKey="month"
                   className="text-xs"
-                  tick={{ fill: "hsl(var(--muted-foreground))" }}
+                  tick={{ fill: "#ffffff" }}
                 />
                 <Tooltip content={<MonthlyTrendTooltip />} />
                 <Bar
