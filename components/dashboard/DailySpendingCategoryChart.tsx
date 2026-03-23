@@ -1,11 +1,11 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Bar,
   BarChart,
   CartesianGrid,
-  Legend,
   Tooltip,
   XAxis,
   YAxis,
@@ -28,6 +28,14 @@ export function DailySpendingCategoryChart({
 }: DailySpendingCategoryChartProps) {
   const hasData = data.length > 0 && categories.length > 0;
   const chartWidth = Math.max(760, data.length * 56);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !hasData) return;
+    // Default view should show latest days on the right.
+    el.scrollLeft = el.scrollWidth;
+  }, [hasData, data.length, categories.length]);
 
   return (
     <Card>
@@ -40,7 +48,7 @@ export function DailySpendingCategoryChart({
             No daily spending data to display yet.
           </p>
         ) : (
-          <div className="overflow-x-auto">
+          <div ref={scrollRef} className="overflow-x-auto">
             <BarChart
               width={chartWidth}
               height={320}
@@ -56,7 +64,7 @@ export function DailySpendingCategoryChart({
               <YAxis
                 className="text-xs"
                 tick={{ fill: "hsl(var(--muted-foreground))" }}
-                tickFormatter={(v) => `$${(Number(v) / 100).toFixed(0)}`}
+                tickFormatter={(v) => `$${Math.round(Number(v) / 100)}`}
               />
               <Tooltip
                 formatter={(value, name) => [
@@ -71,7 +79,6 @@ export function DailySpendingCategoryChart({
                   borderRadius: "8px",
                 }}
               />
-              <Legend />
               {categories.map((c) => (
                 <Bar
                   key={c.key}
