@@ -10,6 +10,9 @@ import { SavingsProjection } from "@/components/dashboard/SavingsProjection";
 import { DashboardRealtime } from "@/components/dashboard/DashboardRealtime";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { format, addMonths, startOfMonth } from "date-fns";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Repeat } from "lucide-react";
+import { formatCurrency } from "@/lib/utils/currency";
 
 const CATEGORY_COLORS: Record<string, string> = {
   Groceries: "#5DCAA5",
@@ -52,6 +55,15 @@ async function DashboardContent() {
       (t) =>
         t.direction === "debit" &&
         (t.user_category_override ?? t.redbark_category) !== "Transfers"
+    )
+    .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
+
+  const recurringSpendingThisMonth = txns
+    .filter(
+      (t) =>
+        t.direction === "debit" &&
+        t.is_recurring === true &&
+        (t.ai_category ?? t.user_category_override ?? t.redbark_category) !== "Transfers"
     )
     .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
 
@@ -152,6 +164,25 @@ async function DashboardContent() {
         spendingThisMonth={spendingThisMonth}
         netSaved={incomeThisMonth - spendingThisMonth}
       />
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardTitle className="text-sm font-medium text-muted-foreground">
+            Monthly Recurring Payments
+          </CardTitle>
+          <div className="rounded-lg bg-purple-50 p-2 dark:bg-purple-950">
+            <Repeat className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p className="text-2xl font-bold">
+            {formatCurrency(recurringSpendingThisMonth)}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Total recurring debit payments detected this month.
+          </p>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <MonthlyTrend data={trendData} />

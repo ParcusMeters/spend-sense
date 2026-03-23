@@ -13,7 +13,7 @@ async function RecurringContent() {
   const { data: txns } = await supabase
     .from("transactions")
     .select(
-      "id, date, description, amount_cents, direction, merchant, ai_category, user_category_override, redbark_category, is_recurring, accounts(redbark_name)"
+      "id, account_id, date, description, amount_cents, direction, merchant, ai_category, user_category_override, redbark_category, is_recurring, accounts(redbark_name)"
     )
     .eq("is_recurring", true)
     .eq("direction", "debit")
@@ -36,6 +36,8 @@ async function RecurringContent() {
         name,
         category,
         accountName,
+        accountId: t.account_id,
+        merchant: t.merchant,
         lastChargeDate: t.date,
         lastAmountCents: t.amount_cents,
       });
