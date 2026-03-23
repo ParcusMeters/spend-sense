@@ -30,6 +30,12 @@ const CATEGORY_COLORS: Record<string, string> = {
   Other: "#888780",
 };
 
+function isTransferCategory(category: string | null | undefined): boolean {
+  if (!category) return false;
+  const value = category.toLowerCase();
+  return value.includes("transfer") || value.includes("xfer");
+}
+
 function getCategoryColor(name: string): string {
   if (CATEGORY_COLORS[name]) return CATEGORY_COLORS[name];
   const hash = name.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
@@ -54,7 +60,9 @@ async function DashboardContent() {
     .filter(
       (t) =>
         t.direction === "credit" &&
-        (t.user_category_override ?? t.redbark_category) !== "Transfers"
+        !isTransferCategory(
+          t.ai_category ?? t.user_category_override ?? t.redbark_category
+        )
     )
     .reduce((sum, t) => sum + t.amount_cents, 0);
 
@@ -62,7 +70,9 @@ async function DashboardContent() {
     .filter(
       (t) =>
         t.direction === "debit" &&
-        (t.user_category_override ?? t.redbark_category) !== "Transfers"
+        !isTransferCategory(
+          t.ai_category ?? t.user_category_override ?? t.redbark_category
+        )
     )
     .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
 
@@ -71,7 +81,9 @@ async function DashboardContent() {
       (t) =>
         t.direction === "debit" &&
         t.is_recurring === true &&
-        (t.ai_category ?? t.user_category_override ?? t.redbark_category) !== "Transfers"
+        !isTransferCategory(
+          t.ai_category ?? t.user_category_override ?? t.redbark_category
+        )
     )
     .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
 
@@ -104,7 +116,7 @@ async function DashboardContent() {
     if (t.direction !== "debit") continue;
     // Prefer AI categories for the dashboard chart.
     const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category ?? "Other";
-    if (cat === "Transfers") continue;
+    if (isTransferCategory(cat)) continue;
     categoryMap[cat] = (categoryMap[cat] ?? 0) + Math.abs(t.amount_cents);
   }
   const sortedCategories = Object.entries(categoryMap).sort((a, b) => b[1] - a[1]);
@@ -128,7 +140,7 @@ async function DashboardContent() {
     if (t.direction !== "debit") continue;
     if (t.date < dailyStartStr) continue;
     const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category ?? "Other";
-    if (cat === "Transfers") continue;
+    if (isTransferCategory(cat)) continue;
     if (!dailyMap[t.date]) dailyMap[t.date] = {};
     dailyMap[t.date][cat] = (dailyMap[t.date][cat] ?? 0) + Math.abs(t.amount_cents);
     dailyCategoryTotals[cat] = (dailyCategoryTotals[cat] ?? 0) + Math.abs(t.amount_cents);
@@ -166,7 +178,7 @@ async function DashboardContent() {
     const monthKey = t.date.slice(0, 7);
     if (!monthKeys.includes(monthKey)) continue;
     const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category ?? "Other";
-    if (cat === "Transfers") continue;
+    if (isTransferCategory(cat)) continue;
 
     if (t.direction === "credit") {
       monthIncomeMap[monthKey] = (monthIncomeMap[monthKey] ?? 0) + t.amount_cents;
@@ -211,8 +223,8 @@ async function DashboardContent() {
   for (const t of allTxns ?? []) {
     const m = t.date.slice(0, 7);
     if (!monthlyData[m]) monthlyData[m] = { income: 0, spending: 0 };
-    const cat = t.user_category_override ?? t.redbark_category;
-    if (cat === "Transfers") continue;
+    const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category;
+    if (isTransferCategory(cat)) continue;
     if (t.direction === "credit") {
       monthlyData[m].income += t.amount_cents;
     } else {
