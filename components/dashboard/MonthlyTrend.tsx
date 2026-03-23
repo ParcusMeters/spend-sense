@@ -128,7 +128,7 @@ export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
                 <XAxis
                   dataKey="month"
                   className="text-xs"
-                  tick={{ fill: "#ffffff" }}
+                  tick={{ fill: "var(--muted-foreground)" }}
                 />
                 <Tooltip content={<MonthlyTrendTooltip />} />
                 <Bar

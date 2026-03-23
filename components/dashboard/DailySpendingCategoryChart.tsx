@@ -129,7 +129,7 @@ export function DailySpendingCategoryChart({
                 <XAxis
                   dataKey="label"
                   className="text-xs"
-                  tick={{ fill: "#ffffff" }}
+                  tick={{ fill: "var(--muted-foreground)" }}
                 />
                 <Tooltip content={<DailyTooltip />} />
                 {categories.map((c) => (
