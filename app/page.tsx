@@ -5,11 +5,12 @@ import { getCurrentMonth, getLastNMonths, getMonthLabel } from "@/lib/utils/date
 import { BalanceCards } from "@/components/dashboard/BalanceCards";
 import { MonthlyTrend } from "@/components/dashboard/MonthlyTrend";
 import { SpendingChart } from "@/components/dashboard/SpendingChart";
+import { DailySpendingCategoryChart } from "@/components/dashboard/DailySpendingCategoryChart";
 import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { SavingsProjection } from "@/components/dashboard/SavingsProjection";
 import { DashboardRealtime } from "@/components/dashboard/DashboardRealtime";
 import { AuthGate } from "@/components/auth/AuthGate";
-import { format, addMonths, startOfMonth } from "date-fns";
+import { format, addMonths, startOfMonth, subDays } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Repeat } from "lucide-react";
 import { formatCurrency } from "@/lib/utils/currency";
@@ -28,6 +29,12 @@ const CATEGORY_COLORS: Record<string, string> = {
   Investing: "#1D9E75",
   Other: "#888780",
 };
+
+function getCategoryColor(name: string): string {
+  if (CATEGORY_COLORS[name]) return CATEGORY_COLORS[name];
+  const hash = name.split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+  return `hsl(${hash % 360} 75% 55%)`;
+}
 
 async function DashboardContent() {
   const supabase = createServiceClient();
@@ -93,15 +100,50 @@ async function DashboardContent() {
     categoryMap[cat] = (categoryMap[cat] ?? 0) + Math.abs(t.amount_cents);
   }
   const sortedCategories = Object.entries(categoryMap).sort((a, b) => b[1] - a[1]);
-  spendingByCategory = sortedCategories.map(([name, value], idx) => ({
+  spendingByCategory = sortedCategories.map(([name, value]) => ({
     name,
     value,
-    // Ensure each category gets a distinct color, even when the name
-    // isn't present in `CATEGORY_COLORS`.
-    color:
-      CATEGORY_COLORS[name] ??
-      `hsl(${(idx * 47) % 360} 75% 55%)`,
+    color: getCategoryColor(name),
   }));
+
+  // Daily spending by category (last 35 days, stacked bars)
+  const dailyWindowDays = 35;
+  const dailyStart = subDays(new Date(), dailyWindowDays - 1);
+  const dailyStartStr = format(dailyStart, "yyyy-MM-dd");
+  const dailyDates = Array.from({ length: dailyWindowDays }, (_, i) =>
+    format(subDays(new Date(), dailyWindowDays - 1 - i), "yyyy-MM-dd")
+  );
+
+  const dailyMap: Record<string, Record<string, number>> = {};
+  const dailyCategoryTotals: Record<string, number> = {};
+  for (const t of allTxns ?? []) {
+    if (t.direction !== "debit") continue;
+    if (t.date < dailyStartStr) continue;
+    const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category ?? "Other";
+    if (cat === "Transfers") continue;
+    if (!dailyMap[t.date]) dailyMap[t.date] = {};
+    dailyMap[t.date][cat] = (dailyMap[t.date][cat] ?? 0) + Math.abs(t.amount_cents);
+    dailyCategoryTotals[cat] = (dailyCategoryTotals[cat] ?? 0) + Math.abs(t.amount_cents);
+  }
+
+  const dailyCategories = Object.entries(dailyCategoryTotals)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name], idx) => ({
+      key: `cat_${idx}`,
+      name,
+      color: getCategoryColor(name),
+    }));
+
+  const dailySpendingData = dailyDates.map((d) => {
+    const row: Record<string, string | number> = {
+      date: d,
+      label: format(new Date(`${d}T00:00:00`), "d MMM"),
+    };
+    for (const c of dailyCategories) {
+      row[c.key] = dailyMap[d]?.[c.name] ?? 0;
+    }
+    return row;
+  });
 
   const monthlyData: Record<string, { income: number; spending: number }> = {};
   for (const t of allTxns ?? []) {
@@ -188,6 +230,11 @@ async function DashboardContent() {
         <MonthlyTrend data={trendData} />
         <SpendingChart data={spendingByCategory} />
       </div>
+
+      <DailySpendingCategoryChart
+        data={dailySpendingData}
+        categories={dailyCategories}
+      />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <RecentTransactions transactions={recentTxns ?? []} />
