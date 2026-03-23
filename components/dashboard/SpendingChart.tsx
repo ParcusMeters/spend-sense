@@ -11,6 +11,43 @@ interface SpendingChartProps {
   }[];
 }
 
+interface PieTooltipEntry {
+  name?: string | number;
+  value?: string | number | null;
+  color?: string;
+}
+
+interface PieTooltipProps {
+  active?: boolean;
+  payload?: PieTooltipEntry[];
+}
+
+function SpendingPieTooltip({ active, payload }: PieTooltipProps) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const first = payload[0];
+  if (!first || Number(first.value ?? 0) <= 0) return null;
+
+  return (
+    <div className="rounded-lg border bg-card p-2 text-xs shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-2">
+          <span
+            className="h-2.5 w-2.5 rounded-full"
+            style={{ backgroundColor: first.color ?? "currentColor" }}
+          />
+          {String(first.name ?? "")}
+        </span>
+        <span className="font-medium">
+          ${(Number(first.value) / 100).toLocaleString("en-AU", {
+            minimumFractionDigits: 2,
+          })}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function SpendingChart({ data }: SpendingChartProps) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
   const hasData = data.length > 0 && total > 0;
@@ -49,17 +86,7 @@ export function SpendingChart({ data }: SpendingChartProps) {
                       <Cell key={i} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip
-                    formatter={(value) => [
-                      `$${(Number(value) / 100).toLocaleString("en-AU", { minimumFractionDigits: 2 })}`,
-                      "",
-                    ]}
-                    contentStyle={{
-                      backgroundColor: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "8px",
-                    }}
-                  />
+                  <Tooltip content={<SpendingPieTooltip />} />
                 </PieChart>
               </ResponsiveContainer>
             </div>

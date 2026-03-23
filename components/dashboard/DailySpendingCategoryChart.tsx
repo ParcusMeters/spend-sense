@@ -24,6 +24,7 @@ interface DailySpendingCategoryChartProps {
 interface DailyTooltipEntry {
   name?: string | number;
   value?: string | number | null;
+  color?: string;
 }
 
 interface DailyTooltipProps {
@@ -44,7 +45,13 @@ function DailyTooltip({ active, label, payload }: DailyTooltipProps) {
       <div className="space-y-1">
         {nonZero.map((p) => (
           <div key={String(p.name)} className="flex items-center justify-between gap-3">
-            <span>{String(p.name)}</span>
+            <span className="flex items-center gap-2">
+              <span
+                className="h-2.5 w-2.5 rounded-full"
+                style={{ backgroundColor: p.color ?? "currentColor" }}
+              />
+              {String(p.name)}
+            </span>
             <span className="font-medium">
               ${(Number(p.value) / 100).toLocaleString("en-AU", {
                 minimumFractionDigits: 2,

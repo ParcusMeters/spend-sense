@@ -10,7 +10,7 @@ import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { SavingsProjection } from "@/components/dashboard/SavingsProjection";
 import { DashboardRealtime } from "@/components/dashboard/DashboardRealtime";
 import { AuthGate } from "@/components/auth/AuthGate";
-import { format, addMonths, startOfMonth, subDays } from "date-fns";
+import { format, addMonths, startOfMonth, subDays, subMonths } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Repeat } from "lucide-react";
 import { formatCurrency } from "@/lib/utils/currency";
@@ -40,6 +40,7 @@ async function DashboardContent() {
   const supabase = createServiceClient();
   const { start: monthStart, end: monthEnd } = getCurrentMonth();
   const { start: sixMonthStart } = getLastNMonths(6);
+  const { start: twelveMonthStart } = getLastNMonths(12);
 
   // Fetch current month transactions
   const { data: monthTxns } = await supabase
@@ -89,6 +90,13 @@ async function DashboardContent() {
     .from("transactions")
     .select("date, direction, amount_cents, ai_category, redbark_category, user_category_override")
     .gte("date", sixMonthStart)
+    .lte("date", monthEnd);
+
+  // Monthly trend chart window (last 12 months)
+  const { data: trendTxns } = await supabase
+    .from("transactions")
+    .select("date, direction, amount_cents, ai_category, redbark_category, user_category_override")
+    .gte("date", twelveMonthStart)
     .lte("date", monthEnd);
 
   const categoryMap: Record<string, number> = {};
@@ -141,6 +149,60 @@ async function DashboardContent() {
     };
     for (const c of dailyCategories) {
       row[c.key] = dailyMap[d]?.[c.name] ?? 0;
+    }
+    return row;
+  });
+
+  // Monthly chart data (last 12 months): income + stacked spending categories
+  const monthKeys = Array.from({ length: 12 }, (_, i) =>
+    format(startOfMonth(subMonths(new Date(), 11 - i)), "yyyy-MM")
+  );
+
+  const monthIncomeMap: Record<string, number> = {};
+  const monthSpendMap: Record<string, Record<string, number>> = {};
+  const monthCategoryTotals: Record<string, number> = {};
+
+  for (const t of trendTxns ?? []) {
+    const monthKey = t.date.slice(0, 7);
+    if (!monthKeys.includes(monthKey)) continue;
+    const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category ?? "Other";
+    if (cat === "Transfers") continue;
+
+    if (t.direction === "credit") {
+      monthIncomeMap[monthKey] = (monthIncomeMap[monthKey] ?? 0) + t.amount_cents;
+    } else {
+      if (!monthSpendMap[monthKey]) monthSpendMap[monthKey] = {};
+      monthSpendMap[monthKey][cat] =
+        (monthSpendMap[monthKey][cat] ?? 0) + Math.abs(t.amount_cents);
+      monthCategoryTotals[cat] =
+        (monthCategoryTotals[cat] ?? 0) + Math.abs(t.amount_cents);
+    }
+  }
+
+  const monthlyTrendCategories = Object.entries(monthCategoryTotals)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name], idx) => ({
+      key: `cat_${idx}`,
+      name,
+      color: getCategoryColor(name),
+    }));
+
+  const monthCategoryKeyByName = new Map(
+    monthlyTrendCategories.map((c) => [c.name, c.key])
+  );
+
+  const monthlyTrendData = monthKeys.map((monthKey) => {
+    const row: Record<string, string | number> = {
+      month: getMonthLabel(`${monthKey}-01`),
+      income: monthIncomeMap[monthKey] ?? 0,
+    };
+    const spendForMonth = monthSpendMap[monthKey] ?? {};
+    for (const [name, cents] of Object.entries(spendForMonth)) {
+      const key = monthCategoryKeyByName.get(name);
+      if (key) row[key] = cents;
+    }
+    for (const c of monthlyTrendCategories) {
+      if (row[c.key] === undefined) row[c.key] = 0;
     }
     return row;
   });
@@ -227,7 +289,7 @@ async function DashboardContent() {
       </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <MonthlyTrend data={trendData} />
+        <MonthlyTrend data={monthlyTrendData} categories={monthlyTrendCategories} />
         <SpendingChart data={spendingByCategory} />
       </div>
 
