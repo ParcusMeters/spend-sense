@@ -1,7 +1,23 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { verifyWebhook } from "@/lib/redbark/webhook";
 import type { RedbarkTransaction } from "@/lib/redbark/types";
 import { createServiceClient } from "@/lib/supabase/server";
+
+type TransactionsSyncedPayload = {
+  id?: string;
+  object?: string;
+  type?: string;
+  api_version?: string;
+  created?: number;
+  data?: { new: RedbarkTransaction[]; updated: RedbarkTransaction[] };
+  metadata?: {
+    sync_run_id?: string;
+    new_count?: number;
+    updated_count?: number;
+    chunk?: number;
+    total_chunks?: number;
+  };
+};
 
 function centsToAud(cents: number): string {
   return `$${(Math.abs(cents) / 100).toFixed(2)}`;
@@ -55,63 +71,12 @@ function txnPreview(t: RedbarkTransaction) {
   };
 }
 
-export async function POST(request: NextRequest) {
+async function processTransactionsSyncedPayload(
+  payload: TransactionsSyncedPayload,
+  deliveryId: string,
+  userAgent: string
+) {
   const startedAt = Date.now();
-  const rawBody = await request.text();
-  const signature = request.headers.get("x-redbark-signature") ?? "";
-  const timestamp = request.headers.get("x-redbark-timestamp") ?? "";
-  const deliveryId = request.headers.get("x-redbark-delivery-id") ?? "";
-  const userAgent = request.headers.get("user-agent") ?? "";
-  const secret = process.env.REDBARK_WEBHOOK_SECRET!;
-
-  let payload: {
-    id?: string;
-    object?: string;
-    type?: string;
-    api_version?: string;
-    created?: number;
-    data?: { new: RedbarkTransaction[]; updated: RedbarkTransaction[] };
-    metadata?: {
-      sync_run_id?: string;
-      new_count?: number;
-      updated_count?: number;
-      chunk?: number;
-      total_chunks?: number;
-    };
-  };
-  try {
-    payload = JSON.parse(rawBody);
-  } catch (e) {
-    console.error("redbark:webhook JSON parse failed", {
-      deliveryId,
-      bodyBytes: rawBody.length,
-      error: String(e),
-    });
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-
-  if (!verifyWebhook(rawBody, signature, timestamp, secret)) {
-    console.warn("redbark:webhook signature verification failed", {
-      deliveryId,
-      hasSignature: Boolean(signature),
-      hasTimestamp: Boolean(timestamp),
-      bodyBytes: rawBody.length,
-    });
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-  }
-
-  if (payload.type !== "transactions.synced") {
-    console.log("redbark:webhook ignored (unsupported event type)", {
-      deliveryId,
-      eventId: payload.id,
-      object: payload.object,
-      type: payload.type,
-      apiVersion: payload.api_version,
-      userAgent,
-    });
-    return NextResponse.json({ status: "ignored", type: payload.type });
-  }
-
   const dataNew = payload.data?.new ?? [];
   const dataUpdated = payload.data?.updated ?? [];
   const meta = payload.metadata ?? {};
@@ -119,7 +84,7 @@ export async function POST(request: NextRequest) {
   const newSummary = summarizeBatch(dataNew);
   const updatedSummary = summarizeBatch(dataUpdated);
 
-  console.log("redbark:webhook transactions.synced received", {
+  console.log("redbark:webhook transactions.synced received (async)", {
     deliveryId,
     eventId: payload.id,
     apiVersion: payload.api_version,
@@ -148,7 +113,6 @@ export async function POST(request: NextRequest) {
 
   const supabase = createServiceClient();
 
-  // Upsert accounts
   const accountMap = new Map<string, string>();
   const allTransactions = [...dataNew, ...dataUpdated];
   const distinctAccountLabels = new Set<string>();
@@ -208,7 +172,6 @@ export async function POST(request: NextRequest) {
     mapSize: accountMap.size,
   });
 
-  // Insert new transactions (ai_status defaults to 'pending')
   let insertedCount = 0;
   let insertErrors = 0;
   for (const txn of dataNew) {
@@ -300,11 +263,78 @@ export async function POST(request: NextRequest) {
     elapsedMs,
     note: "New rows use ai_status=pending until categorise-pending cron runs.",
   });
+}
+
+export async function POST(request: NextRequest) {
+  const rawBody = await request.text();
+  const signature = request.headers.get("x-redbark-signature") ?? "";
+  const timestamp = request.headers.get("x-redbark-timestamp") ?? "";
+  const deliveryId = request.headers.get("x-redbark-delivery-id") ?? "";
+  const userAgent = request.headers.get("user-agent") ?? "";
+  const secret = process.env.REDBARK_WEBHOOK_SECRET!;
+
+  let payload: TransactionsSyncedPayload;
+  try {
+    payload = JSON.parse(rawBody) as TransactionsSyncedPayload;
+  } catch (e) {
+    console.error("redbark:webhook JSON parse failed", {
+      deliveryId,
+      bodyBytes: rawBody.length,
+      error: String(e),
+    });
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  if (!verifyWebhook(rawBody, signature, timestamp, secret)) {
+    console.warn("redbark:webhook signature verification failed", {
+      deliveryId,
+      hasSignature: Boolean(signature),
+      hasTimestamp: Boolean(timestamp),
+      bodyBytes: rawBody.length,
+    });
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  if (payload.type !== "transactions.synced") {
+    console.log("redbark:webhook ignored (unsupported event type)", {
+      deliveryId,
+      eventId: payload.id,
+      object: payload.object,
+      type: payload.type,
+      apiVersion: payload.api_version,
+      userAgent,
+    });
+    return NextResponse.json({ status: "ignored", type: payload.type });
+  }
+
+  const dataNew = payload.data?.new ?? [];
+  const dataUpdated = payload.data?.updated ?? [];
+  const meta = payload.metadata ?? {};
+
+  after(async () => {
+    try {
+      await processTransactionsSyncedPayload(payload, deliveryId, userAgent);
+    } catch (err) {
+      console.error("redbark:webhook async processing failed", {
+        deliveryId,
+        error: String(err),
+      });
+    }
+  });
+
+  console.log("redbark:webhook accepted (processing async)", {
+    deliveryId,
+    newQueued: dataNew.length,
+    updatedQueued: dataUpdated.length,
+    chunk: meta.chunk,
+    totalChunks: meta.total_chunks,
+  });
 
   return NextResponse.json({
-    status: "ok",
+    status: "accepted",
     delivery_id: deliveryId,
-    new_count: insertedCount,
+    message: "processing_async",
+    new_count: dataNew.length,
     updated_count: dataUpdated.length,
     chunk: `${meta.chunk ?? "?"}/${meta.total_chunks ?? "?"}`,
   });
