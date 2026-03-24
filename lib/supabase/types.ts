@@ -1,6 +1,7 @@
 export interface Account {
   id: string;
   redbark_name: string;
+  redbark_account_id: string | null;
   institution: string;
   type: string;
   balance: number;

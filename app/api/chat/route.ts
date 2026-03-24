@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createServiceClient } from "@/lib/supabase/server";
+import { syncRedbarkBalancesToDatabase } from "@/lib/redbark/sync-balances";
 import { format, subMonths } from "date-fns";
 
 const anthropic = new Anthropic();
@@ -18,6 +19,7 @@ export async function POST(request: NextRequest) {
 
     // Fetch financial context for Claude
     const supabase = createServiceClient();
+    await syncRedbarkBalancesToDatabase(supabase);
     const now = new Date();
     const threeMonthsAgo = format(subMonths(now, 3), "yyyy-MM-dd");
     const today = format(now, "yyyy-MM-dd");
@@ -87,7 +89,10 @@ export async function POST(request: NextRequest) {
       .join(", ");
 
     const accountsSummary = (accounts ?? [])
-      .map((a) => `${a.redbark_name} (${a.institution}, ${a.type}): $${(a.balance / 100).toFixed(2)}`)
+      .map(
+        (a) =>
+          `${a.redbark_name} (${a.institution}, ${a.type}): $${Number(a.balance).toFixed(2)}`
+      )
       .join("; ");
 
     const monthlySummary = (monthlySummaries ?? [])

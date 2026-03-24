@@ -4,9 +4,11 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { getLastNMonths, getMonthLabel } from "@/lib/utils/dates";
 import { ProjectionsClient } from "./ProjectionsClient";
 import { AuthGate } from "@/components/auth/AuthGate";
+import { syncRedbarkBalancesToDatabase } from "@/lib/redbark/sync-balances";
 
 async function ProjectionsContent() {
   const supabase = createServiceClient();
+  await syncRedbarkBalancesToDatabase(supabase);
   const { start } = getLastNMonths(6);
 
   const { data: txns } = await supabase

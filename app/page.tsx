@@ -14,6 +14,7 @@ import { format, addMonths, startOfMonth, subDays, subMonths } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Repeat } from "lucide-react";
 import { formatCurrency } from "@/lib/utils/currency";
+import { syncRedbarkBalancesToDatabase } from "@/lib/redbark/sync-balances";
 
 const CATEGORY_COLORS: Record<string, string> = {
   Groceries: "#5DCAA5",
@@ -44,6 +45,7 @@ function getCategoryColor(name: string): string {
 
 async function DashboardContent() {
   const supabase = createServiceClient();
+  await syncRedbarkBalancesToDatabase(supabase);
   const { start: monthStart, end: monthEnd } = getCurrentMonth();
   const { start: sixMonthStart } = getLastNMonths(6);
   const { start: twelveMonthStart } = getLastNMonths(12);

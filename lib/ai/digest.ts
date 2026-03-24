@@ -1,7 +1,45 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceClient } from "@/lib/supabase/server";
+import { syncRedbarkBalancesToDatabase } from "@/lib/redbark/sync-balances";
 
 const anthropic = new Anthropic();
+
+async function getBalancePromptBlock(supabase: SupabaseClient): Promise<{
+  totalDollars: number;
+  lines: string;
+  data: { total_balance_dollars: number; accounts: { name: string; balance: number; currency: string }[] };
+}> {
+  const { data: rows } = await supabase
+    .from("accounts")
+    .select("redbark_name, institution, type, balance, currency")
+    .order("redbark_name");
+
+  const list = rows ?? [];
+  const totalDollars = list.reduce((s, a) => s + Number(a.balance), 0);
+  const lines =
+    list.length === 0
+      ? "- No accounts on file (balances not synced yet)."
+      : list
+          .map(
+            (a) =>
+              `- ${a.redbark_name} (${a.institution}, ${a.type}): $${Number(a.balance).toFixed(2)} ${(a.currency ?? "AUD").toUpperCase()}`
+          )
+          .join("\n");
+
+  return {
+    totalDollars,
+    lines,
+    data: {
+      total_balance_dollars: totalDollars,
+      accounts: list.map((a) => ({
+        name: a.redbark_name,
+        balance: Number(a.balance),
+        currency: (a.currency ?? "AUD").toUpperCase(),
+      })),
+    },
+  };
+}
 
 export async function generateDigest(
   type: "weekly" | "monthly" | "ad_hoc",
@@ -16,6 +54,8 @@ export async function generateDigest(
     hasApiKey: Boolean(process.env.ANTHROPIC_API_KEY),
   });
   const supabase = createServiceClient();
+  await syncRedbarkBalancesToDatabase(supabase);
+  const balanceBlock = await getBalancePromptBlock(supabase);
 
   const { data: transactions } = await supabase
     .from("transactions")
@@ -26,10 +66,11 @@ export async function generateDigest(
 
   if (!transactions || transactions.length === 0) {
     console.log("AI digest skipped: no transactions", { type, startDate, endDate });
+    const bal = balanceBlock.totalDollars.toFixed(2);
     return {
-      content: "No transactions found for this period.",
-      summary: "No activity",
-      data: {},
+      content: `No transactions found for this period.\n\n## Current balances\n**Total across accounts:** $${bal}\n\n${balanceBlock.lines}`,
+      summary: `No activity · total balance ~$${bal}`,
+      data: { ...balanceBlock.data },
     };
   }
 
@@ -84,6 +125,11 @@ Total income: $${(totalIncome / 100).toFixed(2)}
 Total spending: $${(totalSpending / 100).toFixed(2)}
 Net saved: $${((totalIncome - totalSpending) / 100).toFixed(2)}
 
+Current balances (as of this run — from linked accounts; use when relevant to runway, savings, or overall position):
+Total across all accounts: $${balanceBlock.totalDollars.toFixed(2)}
+Per account:
+${balanceBlock.lines}
+
 Top spending categories:
 ${topCategories}
 
@@ -93,9 +139,9 @@ ${type === "weekly" ? `Previous week analysis (reference only):
 ${previousWeeklyInsight?.summary ? `Summary: ${previousWeeklyInsight.summary}` : "Summary: N/A"}
 ${previousWeeklyInsight?.content ? previousWeeklyInsight.content.slice(0, 800) : ""}` : ""}
 
-${type === "weekly" ? "Provide a concise weekly summary with spending patterns, notable transactions, and 2-3 actionable tips." : ""}
-${type === "monthly" ? "Provide a comprehensive monthly report with trend analysis, category breakdown, savings rate commentary, and 3-5 actionable recommendations." : ""}
-${type === "ad_hoc" ? "Provide an analytical summary of this period with key insights and patterns." : ""}
+${type === "weekly" ? "Provide a concise weekly summary with spending patterns, notable transactions, and 2-3 actionable tips. Where it adds value, tie the period's cash flow to current balances (e.g. buffer, progress toward goals)." : ""}
+${type === "monthly" ? "Provide a comprehensive monthly report with trend analysis, category breakdown, savings rate commentary, and 3-5 actionable recommendations. Where it adds value, relate the month to current total balance and per-account picture." : ""}
+${type === "ad_hoc" ? "Provide an analytical summary of this period with key insights and patterns. Reference current balances if relevant." : ""}
 
 Write in a friendly but professional tone. Use markdown formatting. Be specific with numbers. Marcus earns ~$5,841/month net and aims for a $20,000 savings goal.`;
 
@@ -147,6 +193,9 @@ Total income: $${incomeDollars}
 Total spending: $${spendingDollars}
 Net saved: $${netSavedDollars}
 
+Current balances (total): $${balanceBlock.totalDollars.toFixed(2)}
+${balanceBlock.lines}
+
 Top spending categories:
 ${topCategoryBullets}
 
@@ -174,6 +223,7 @@ Next steps:
         transaction_count: transactions.length,
         category_breakdown: categoryTotals,
         anomaly_count: anomalyCount,
+        ...balanceBlock.data,
       },
     };
   }
@@ -199,6 +249,7 @@ Next steps:
       transaction_count: transactions.length,
       category_breakdown: categoryTotals,
       anomaly_count: anomalyCount,
+      ...balanceBlock.data,
     },
   };
 }

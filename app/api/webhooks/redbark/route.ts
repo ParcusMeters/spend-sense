@@ -33,44 +33,49 @@ export async function POST(request: NextRequest) {
   const allTransactions = [...payload.data.new, ...payload.data.updated];
 
   for (const txn of allTransactions) {
-    if (!accountMap.has(txn.account)) {
-      const institution = txn.account.toLowerCase().includes("up")
+    const accountLabel = txn.account_name ?? txn.account;
+    if (!accountMap.has(accountLabel)) {
+      const institution = accountLabel.toLowerCase().includes("up")
         ? "Up Bank"
         : "CommBank";
-      const type = txn.account.toLowerCase().includes("saver") ||
-        txn.account.toLowerCase().includes("saving")
+      const type = accountLabel.toLowerCase().includes("saver") ||
+        accountLabel.toLowerCase().includes("saving")
         ? "savings"
-        : txn.account.toLowerCase().includes("invest")
+        : accountLabel.toLowerCase().includes("invest")
           ? "investment"
           : "transaction";
 
+      const row: Record<string, unknown> = {
+        redbark_name: accountLabel,
+        institution,
+        type,
+        last_synced_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      if (txn.account_id) {
+        row.redbark_account_id = txn.account_id;
+      }
+
       const { data: account } = await supabase
         .from("accounts")
-        .upsert(
-          {
-            redbark_name: txn.account,
-            institution,
-            type,
-            last_synced_at: new Date().toISOString(),
-          },
-          { onConflict: "redbark_name" }
-        )
+        .upsert(row, { onConflict: "redbark_name" })
         .select("id")
         .single();
 
-      if (account) accountMap.set(txn.account, account.id);
+      if (account) accountMap.set(accountLabel, account.id);
     }
   }
 
   // Insert new transactions (ai_status defaults to 'pending')
   let insertedCount = 0;
   for (const txn of payload.data.new) {
+    const label = txn.account_name ?? txn.account;
     const { error } = await supabase
       .from("transactions")
       .upsert(
         {
           redbark_id: txn.id,
-          account_id: accountMap.get(txn.account),
+          account_id: accountMap.get(label),
           date: txn.transaction_date,
           description: txn.description,
           amount_cents: txn.amount,

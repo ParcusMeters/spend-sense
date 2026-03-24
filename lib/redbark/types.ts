@@ -7,6 +7,11 @@ export interface RedbarkTransaction {
   description: string;
   direction: "debit" | "credit";
   class: string;
+  /** Stable account UUID from Redbark (preferred over `account` string). */
+  account_id?: string;
+  /** Human-readable account name (preferred over deprecated `account`). */
+  account_name?: string;
+  /** @deprecated Use `account_id` + `account_name`. */
   account: string;
   transaction_date: string;
   post_date: string | null;
