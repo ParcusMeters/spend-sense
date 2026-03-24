@@ -1,16 +1,30 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/utils/currency";
 import { useRouter } from "next/navigation";
 
+/** Coalesce many INSERTs (e.g. webhook bulk sync) into one RSC refresh. */
+const REFRESH_DEBOUNCE_MS = 1200;
+
 export function DashboardRealtime() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    const scheduleRefresh = () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
+      refreshTimerRef.current = setTimeout(() => {
+        refreshTimerRef.current = null;
+        router.refresh();
+      }, REFRESH_DEBOUNCE_MS);
+    };
+
     const channel = supabase
       .channel("transactions-realtime")
       .on(
@@ -39,12 +53,16 @@ export function DashboardRealtime() {
             });
           }
 
-          router.refresh();
+          scheduleRefresh();
         }
       )
       .subscribe();
 
     return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
       supabase.removeChannel(channel);
     };
   }, [supabase, router]);
