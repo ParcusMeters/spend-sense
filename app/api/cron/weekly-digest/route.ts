@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { generateDigest } from "@/lib/ai/digest";
-import { getCurrentWeek } from "@/lib/utils/dates";
+import { getPreviousWeek } from "@/lib/utils/dates";
 import { sendDigestEmail } from "@/lib/email/send";
 
 export async function GET(request: NextRequest) {
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { start, end } = getCurrentWeek();
+  const { start, end } = getPreviousWeek();
   const result = await generateDigest("weekly", start, end);
   const supabase = createServiceClient();
 

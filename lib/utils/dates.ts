@@ -1,4 +1,12 @@
-import { format, startOfMonth, endOfMonth, subMonths, startOfWeek, endOfWeek } from "date-fns";
+import {
+  format,
+  startOfMonth,
+  endOfMonth,
+  subMonths,
+  subWeeks,
+  startOfWeek,
+  endOfWeek,
+} from "date-fns";
 
 export function getCurrentMonth(): { start: string; end: string } {
   const now = new Date();
@@ -21,6 +29,16 @@ export function getCurrentWeek(): { start: string; end: string } {
   return {
     start: format(startOfWeek(now, { weekStartsOn: 1 }), "yyyy-MM-dd"),
     end: format(endOfWeek(now, { weekStartsOn: 1 }), "yyyy-MM-dd"),
+  };
+}
+
+/** Completed Mon–Sun week immediately before the current calendar week (for weekly digests). */
+export function getPreviousWeek(): { start: string; end: string } {
+  const now = new Date();
+  const prior = subWeeks(now, 1);
+  return {
+    start: format(startOfWeek(prior, { weekStartsOn: 1 }), "yyyy-MM-dd"),
+    end: format(endOfWeek(prior, { weekStartsOn: 1 }), "yyyy-MM-dd"),
   };
 }
 
