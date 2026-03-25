@@ -15,12 +15,13 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceClient();
   const startedAt = Date.now();
 
-  // Pick up pending + failed transactions
+  // Pending/failed: newest bank transaction dates first, then work backwards
   const { data: pending, error: fetchError } = await supabase
     .from("transactions")
     .select("id, redbark_id, description, amount_cents, direction, merchant, redbark_category, date")
     .in("ai_status", ["pending", "failed"])
-    .order("created_at", { ascending: true })
+    .order("date", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(BATCH_SIZE * MAX_BATCHES_PER_RUN);
 
   if (fetchError) {
