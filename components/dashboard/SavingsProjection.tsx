@@ -35,12 +35,28 @@ export function SavingsProjection({ data, savingsGoal }: SavingsProjectionProps)
               <XAxis
                 dataKey="month"
                 className="text-xs"
-                tick={{ fill: "hsl(var(--muted-foreground))" }}
+                tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+                label={{
+                  value: "Month",
+                  position: "insideBottom",
+                  offset: -4,
+                  fill: "hsl(var(--muted-foreground))",
+                  fontSize: 12,
+                  fontWeight: 500,
+                }}
               />
               <YAxis
                 className="text-xs"
-                tick={{ fill: "hsl(var(--muted-foreground))" }}
+                tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
                 tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                label={{
+                  value: "Projected balance",
+                  angle: -90,
+                  position: "insideLeft",
+                  fill: "hsl(var(--muted-foreground))",
+                  fontSize: 12,
+                  fontWeight: 500,
+                }}
               />
               <Tooltip
                 formatter={(value) => [
