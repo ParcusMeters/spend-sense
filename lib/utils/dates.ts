@@ -1,4 +1,5 @@
 import {
+  eachMonthOfInterval,
   format,
   parseISO,
   startOfMonth,
@@ -62,4 +63,14 @@ export function transactionMonthKey(dateStr: string | null | undefined): string 
   const m = dateStr.match(/^(\d{4})-(\d{2})-\d{2}/);
   if (!m) return null;
   return `${m[1]}-${m[2]}`;
+}
+
+/** Every calendar month from `startKey` to `endKey` inclusive (`yyyy-MM`). */
+export function monthKeysBetweenInclusive(startKey: string, endKey: string): string[] {
+  if (startKey > endKey) {
+    return monthKeysBetweenInclusive(endKey, startKey);
+  }
+  const start = startOfMonth(parseISO(`${startKey}-01`));
+  const end = startOfMonth(parseISO(`${endKey}-01`));
+  return eachMonthOfInterval({ start, end }).map((d) => format(d, "yyyy-MM"));
 }

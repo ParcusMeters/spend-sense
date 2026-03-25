@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getMonthLabel } from "@/lib/utils/dates";
 import {
@@ -9,6 +8,7 @@ import {
   XAxis,
   CartesianGrid,
   Tooltip,
+  ResponsiveContainer,
 } from "recharts";
 
 interface MonthlyTrendProps {
@@ -24,7 +24,6 @@ interface TrendTooltipEntry {
   name?: string | number;
   value?: string | number | null;
   color?: string;
-  /** Full chart row (Recharts) */
   payload?: Record<string, unknown>;
 }
 
@@ -74,11 +73,17 @@ function MonthlyTrendTooltip({ active, label, payload }: TrendTooltipProps) {
   );
 }
 
+const CHART_HEIGHT = 320;
+/** Wider canvas when there are more months so bars stay readable; parent scrolls horizontally if needed. */
+const PX_PER_MONTH = 52;
+const CHART_FLOOR_WIDTH = 280;
+
 export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
   const hasData = data.length > 0;
-  const chartWidth = Math.max(760, data.length * 88);
-  const chartHeight = 300;
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const chartMinWidth = Math.max(CHART_FLOOR_WIDTH, data.length * PX_PER_MONTH);
+
+  const barCategoryGap =
+    data.length <= 6 ? "20%" : data.length <= 12 ? "14%" : data.length <= 36 ? "8%" : "5%";
 
   const maxMonthlyCents = data.reduce((max, row) => {
     const income = Number(row.income ?? 0);
@@ -94,12 +99,6 @@ export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
     Math.round(niceMaxCents - (niceMaxCents * i) / 4)
   );
 
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || !hasData) return;
-    el.scrollLeft = el.scrollWidth;
-  }, [hasData, data.length, categories.length]);
-
   return (
     <Card>
       <CardHeader>
@@ -113,7 +112,7 @@ export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
         ) : (
           <div className="flex gap-2">
             <div className="w-16 shrink-0 border-r pr-2">
-              <div className="relative" style={{ height: chartHeight }}>
+              <div className="relative" style={{ height: CHART_HEIGHT }}>
                 {yTicks.map((tick, i) => (
                   <span
                     key={tick}
@@ -126,44 +125,54 @@ export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
               </div>
             </div>
 
-            <div ref={scrollRef} className="overflow-x-auto">
-              <BarChart
-                width={chartWidth}
-                height={chartHeight}
-                data={data}
-                barGap={4}
-                margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
+            <div className="min-w-0 flex-1 overflow-x-auto">
+              <div
+                style={{
+                  width: "100%",
+                  minWidth: chartMinWidth,
+                  height: CHART_HEIGHT,
+                }}
               >
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis
-                  type="category"
-                  dataKey="monthKey"
-                  tickFormatter={(mk) =>
-                    typeof mk === "string" && /^\d{4}-\d{2}$/.test(mk)
-                      ? getMonthLabel(`${mk}-01`)
-                      : String(mk ?? "")
-                  }
-                  className="text-xs"
-                  tick={{ fill: "var(--muted-foreground)" }}
-                />
-                <Tooltip content={<MonthlyTrendTooltip />} />
-                <Bar
-                  dataKey="income"
-                  name="Income"
-                  fill="hsl(152, 69%, 31%)"
-                  radius={[4, 4, 0, 0]}
-                />
-                {categories.map((c) => (
-                  <Bar
-                    key={c.key}
-                    dataKey={c.key}
-                    name={c.name}
-                    stackId="spending"
-                    fill={c.color}
-                    radius={[0, 0, 0, 0]}
-                  />
-                ))}
-              </BarChart>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={data}
+                    barGap={2}
+                    barCategoryGap={barCategoryGap}
+                    margin={{ top: 8, right: 8, left: 8, bottom: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis
+                      type="category"
+                      dataKey="monthKey"
+                      tickFormatter={(mk) =>
+                        typeof mk === "string" && /^\d{4}-\d{2}$/.test(mk)
+                          ? getMonthLabel(`${mk}-01`)
+                          : String(mk ?? "")
+                      }
+                      minTickGap={data.length > 20 ? 4 : 8}
+                      className="text-xs"
+                      tick={{ fill: "var(--muted-foreground)" }}
+                    />
+                    <Tooltip content={<MonthlyTrendTooltip />} />
+                    <Bar
+                      dataKey="income"
+                      name="Income"
+                      fill="hsl(152, 69%, 31%)"
+                      radius={[4, 4, 0, 0]}
+                    />
+                    {categories.map((c) => (
+                      <Bar
+                        key={c.key}
+                        dataKey={c.key}
+                        name={c.name}
+                        stackId="spending"
+                        fill={c.color}
+                        radius={[0, 0, 0, 0]}
+                      />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </div>
         )}

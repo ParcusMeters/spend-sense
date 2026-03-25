@@ -5,6 +5,7 @@ import {
   getCurrentMonth,
   getLastNMonths,
   getMonthLabel,
+  monthKeysBetweenInclusive,
   transactionMonthKey,
 } from "@/lib/utils/dates";
 import { BalanceCards } from "@/components/dashboard/BalanceCards";
@@ -15,7 +16,7 @@ import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { SavingsProjection } from "@/components/dashboard/SavingsProjection";
 import { DashboardRealtime } from "@/components/dashboard/DashboardRealtime";
 import { AuthGate } from "@/components/auth/AuthGate";
-import { format, addMonths, startOfMonth, subDays, subMonths } from "date-fns";
+import { format, addMonths, startOfMonth, subDays } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Repeat } from "lucide-react";
 import { formatCurrency } from "@/lib/utils/currency";
@@ -53,7 +54,6 @@ async function DashboardContent() {
   await syncRedbarkBalancesToDatabase(supabase);
   const { start: monthStart, end: monthEnd } = getCurrentMonth();
   const { start: sixMonthStart } = getLastNMonths(6);
-  const { start: twelveMonthStart } = getLastNMonths(12);
 
   // Fetch current month transactions
   const { data: monthTxns } = await supabase
@@ -111,12 +111,58 @@ async function DashboardContent() {
     .gte("date", sixMonthStart)
     .lte("date", monthEnd);
 
-  // Monthly trend chart window (last 12 months)
-  const { data: trendTxns } = await supabase
+  // Monthly trend: full history (paginated — Supabase caps at 1000 rows per request)
+  const TREND_PAGE = 1000;
+  const { data: firstTxn } = await supabase
     .from("transactions")
-    .select("date, direction, amount_cents, ai_category, redbark_category, user_category_override")
-    .gte("date", twelveMonthStart)
-    .lte("date", monthEnd);
+    .select("date")
+    .order("date", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const { data: lastTxn } = await supabase
+    .from("transactions")
+    .select("date")
+    .order("date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const firstMonthKey = transactionMonthKey(firstTxn?.date ?? null);
+  const lastMonthKey = transactionMonthKey(lastTxn?.date ?? null);
+
+  const monthKeys =
+    firstMonthKey && lastMonthKey
+      ? monthKeysBetweenInclusive(firstMonthKey, lastMonthKey)
+      : [];
+
+  const trendTxns: {
+    date: string;
+    direction: string;
+    amount_cents: number;
+    ai_category: string | null;
+    redbark_category: string | null;
+    user_category_override: string | null;
+  }[] = [];
+
+  if (firstTxn?.date && lastTxn?.date && monthKeys.length > 0) {
+    for (let offset = 0; ; offset += TREND_PAGE) {
+      const { data: page, error: trendPageError } = await supabase
+        .from("transactions")
+        .select("date, direction, amount_cents, ai_category, redbark_category, user_category_override")
+        .gte("date", firstTxn.date)
+        .lte("date", lastTxn.date)
+        .order("date", { ascending: true })
+        .order("id", { ascending: true })
+        .range(offset, offset + TREND_PAGE - 1);
+
+      if (trendPageError) {
+        console.error("dashboard: monthly trend page fetch failed", trendPageError);
+        break;
+      }
+      if (!page?.length) break;
+      trendTxns.push(...page);
+      if (page.length < TREND_PAGE) break;
+    }
+  }
 
   const categoryMap: Record<string, number> = {};
   for (const t of allTxns ?? []) {
@@ -171,11 +217,6 @@ async function DashboardContent() {
     }
     return row;
   });
-
-  // Monthly chart data (last 12 months): income + stacked spending categories
-  const monthKeys = Array.from({ length: 12 }, (_, i) =>
-    format(startOfMonth(subMonths(new Date(), 11 - i)), "yyyy-MM")
-  );
 
   const monthIncomeMap: Record<string, number> = {};
   const monthSpendMap: Record<string, Record<string, number>> = {};
