@@ -20,11 +20,13 @@ import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { SavingsProjection } from "@/components/dashboard/SavingsProjection";
 import { DashboardRealtime } from "@/components/dashboard/DashboardRealtime";
 import { AuthGate } from "@/components/auth/AuthGate";
-import { format, addMonths, startOfMonth } from "date-fns";
+import { format, addMonths, startOfMonth, getDay, getDate, getDaysInMonth } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Repeat } from "lucide-react";
 import { formatCurrency } from "@/lib/utils/currency";
 import { syncRedbarkBalancesToDatabase } from "@/lib/redbark/sync-balances";
+import { SpendingGoalTracker } from "@/components/dashboard/SpendingGoalTracker";
+import { getCurrentWeek } from "@/lib/utils/dates";
 
 async function DashboardContent() {
   const supabase = createServiceClient();
@@ -70,6 +72,29 @@ async function DashboardContent() {
         )
     )
     .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
+
+  // Weekly spending for spending goal tracker
+  const { start: weekStart, end: weekEnd } = getCurrentWeek();
+  const { data: weekTxns } = await supabase
+    .from("transactions")
+    .select("amount_cents, direction, ai_category, redbark_category, user_category_override")
+    .gte("date", weekStart)
+    .lte("date", weekEnd);
+
+  const weeklySpending = (weekTxns ?? [])
+    .filter(
+      (t) =>
+        t.direction === "debit" &&
+        !isTransferCategory(t.ai_category ?? t.user_category_override ?? t.redbark_category)
+    )
+    .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
+
+  // Days into week (Mon=1 .. Sun=7)
+  const today = new Date();
+  const jsDay = getDay(today); // 0=Sun, 1=Mon...6=Sat
+  const daysIntoWeek = jsDay === 0 ? 7 : jsDay;
+  const daysIntoMonth = getDate(today);
+  const daysInMonth = getDaysInMonth(today);
 
   // Fetch account balances
   const { data: accounts } = await supabase.from("accounts").select("balance");
@@ -277,7 +302,13 @@ async function DashboardContent() {
       />
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <SpendingChart data={spendingByCategory} />
+        <SpendingGoalTracker
+          weeklySpendingCents={weeklySpending}
+          monthlySpendingCents={spendingThisMonth}
+          daysIntoWeek={daysIntoWeek}
+          daysIntoMonth={daysIntoMonth}
+          daysInMonth={daysInMonth}
+        />
         <Card className="min-w-0">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -297,6 +328,8 @@ async function DashboardContent() {
           </CardContent>
         </Card>
       </div>
+
+      <SpendingChart data={spendingByCategory} />
 
       <TrendAndDailySection
         monthlyTrendData={monthlyTrendData}

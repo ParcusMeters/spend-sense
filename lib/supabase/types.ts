@@ -86,6 +86,13 @@ export interface Anomaly {
   created_at: string;
 }
 
+export interface SpendingBudget {
+  id: string;
+  weekly_limit_cents: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MonthlySummary {
   id: string;
   month: string;
