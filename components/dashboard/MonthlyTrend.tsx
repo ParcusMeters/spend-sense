@@ -74,16 +74,15 @@ function MonthlyTrendTooltip({ active, label, payload }: TrendTooltipProps) {
 }
 
 const CHART_HEIGHT = 320;
-/** Wider canvas when there are more months so bars stay readable; parent scrolls horizontally if needed. */
-const PX_PER_MONTH = 52;
-const CHART_FLOOR_WIDTH = 280;
+/** Horizontal space per month (2× prior); chart min width grows with month count so bars are not squashed — scroll for more history. */
+const PX_PER_MONTH = 104;
+const CHART_FLOOR_WIDTH = 560;
+/** Fixed pixel gap between month groups (not %) so bar thickness stays driven by minWidth ÷ months. */
+const BAR_CATEGORY_GAP_PX = 20;
 
 export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
   const hasData = data.length > 0;
   const chartMinWidth = Math.max(CHART_FLOOR_WIDTH, data.length * PX_PER_MONTH);
-
-  const barCategoryGap =
-    data.length <= 6 ? "20%" : data.length <= 12 ? "14%" : data.length <= 36 ? "8%" : "5%";
 
   const maxMonthlyCents = data.reduce((max, row) => {
     const income = Number(row.income ?? 0);
@@ -100,17 +99,17 @@ export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
   );
 
   return (
-    <Card>
+    <Card className="w-full min-w-0">
       <CardHeader>
         <CardTitle>Income vs Spending</CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="min-w-0">
         {!hasData ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             No monthly trend data yet.
           </p>
         ) : (
-          <div className="flex gap-2">
+          <div className="flex w-full min-w-0 gap-2">
             <div className="w-16 shrink-0 border-r pr-2">
               <div className="relative" style={{ height: CHART_HEIGHT }}>
                 {yTicks.map((tick, i) => (
@@ -125,7 +124,7 @@ export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
               </div>
             </div>
 
-            <div className="min-w-0 flex-1 overflow-x-auto">
+            <div className="min-w-0 w-full flex-1 overflow-x-auto">
               <div
                 style={{
                   width: "100%",
@@ -136,8 +135,8 @@ export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
                     data={data}
-                    barGap={2}
-                    barCategoryGap={barCategoryGap}
+                    barGap={4}
+                    barCategoryGap={BAR_CATEGORY_GAP_PX}
                     margin={{ top: 8, right: 8, left: 8, bottom: 8 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />

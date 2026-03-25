@@ -53,7 +53,7 @@ export function SpendingChart({ data }: SpendingChartProps) {
   const hasData = data.length > 0 && total > 0;
 
   return (
-    <Card>
+    <Card className="w-full min-w-0">
       <CardHeader>
         <CardTitle>Spending by Category (Last 6 Months)</CardTitle>
       </CardHeader>

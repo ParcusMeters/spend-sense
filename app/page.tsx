@@ -332,7 +332,7 @@ async function DashboardContent() {
         netSaved={incomeThisMonth - spendingThisMonth}
       />
 
-      <Card>
+      <Card className="w-full">
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">
             Monthly Recurring Payments
@@ -351,10 +351,9 @@ async function DashboardContent() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <MonthlyTrend data={monthlyTrendData} categories={monthlyTrendCategories} />
-        <SpendingChart data={spendingByCategory} />
-      </div>
+      <SpendingChart data={spendingByCategory} />
+
+      <MonthlyTrend data={monthlyTrendData} categories={monthlyTrendCategories} />
 
       <DailySpendingCategoryChart
         data={dailySpendingData}
