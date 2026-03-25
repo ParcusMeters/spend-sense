@@ -8,6 +8,13 @@ import {
 } from "date-fns";
 import { transactionMonthKey } from "@/lib/utils/dates";
 
+/** Label for a DB calendar date (`yyyy-MM-dd`) without UTC midnight parseISO shifts. */
+function calendarDayLabel(ymd: string): string {
+  const [y, m, day] = ymd.split("-").map(Number);
+  if (!y || !m || !day) return ymd;
+  return format(new Date(y, m - 1, day), "d MMM");
+}
+
 export const CATEGORY_COLORS: Record<string, string> = {
   Groceries: "#5DCAA5",
   "Eating out": "#ED93B1",
@@ -106,7 +113,7 @@ export function buildDailySpendingChartData(
   const data = dates.map((d) => {
     const row: Record<string, string | number> = {
       date: d,
-      label: format(parseISO(`${d}T00:00:00`), "d MMM"),
+      label: calendarDayLabel(d),
     };
     for (const c of categories) {
       row[c.key] = dailyMap[d]?.[c.name] ?? 0;

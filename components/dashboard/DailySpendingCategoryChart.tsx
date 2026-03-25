@@ -96,9 +96,20 @@ export function DailySpendingCategoryChart({
     el.scrollLeft = el.scrollWidth;
   }, [hasData, data.length, categories.length, title]);
 
-  function handleDayBarClick(_: unknown, index: number) {
+  function handleDayBarClick(barEntry: unknown, rectIndex: number) {
     if (!onDayClick) return;
-    const row = data[index];
+    const be = barEntry as {
+      payload?: { date?: unknown };
+      originalDataIndex?: number;
+    };
+    const fromPayload = be?.payload?.date;
+    if (typeof fromPayload === "string" && /^\d{4}-\d{2}-\d{2}$/.test(fromPayload)) {
+      onDayClick(fromPayload);
+      return;
+    }
+    const idx =
+      typeof be?.originalDataIndex === "number" ? be.originalDataIndex : rectIndex;
+    const row = data[idx];
     const d = row?.date;
     if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) onDayClick(d);
   }
