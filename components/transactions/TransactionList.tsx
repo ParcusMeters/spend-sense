@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { TransactionRow } from "./TransactionRow";
@@ -39,6 +40,8 @@ export function TransactionList() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [direction, setDirection] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
 
@@ -51,6 +54,13 @@ export function TransactionList() {
       .select("*, accounts(redbark_name)")
       .order("date", { ascending: false })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+
+    if (dateFrom) {
+      query = query.gte("date", dateFrom);
+    }
+    if (dateTo) {
+      query = query.lte("date", dateTo);
+    }
 
     if (search) {
       query = query.or(
@@ -77,7 +87,7 @@ export function TransactionList() {
       setHasMore(data.length === PAGE_SIZE);
     }
     setLoading(false);
-  }, [search, category, direction, page]);
+  }, [search, category, direction, dateFrom, dateTo, page]);
 
   useEffect(() => {
     fetchTransactions();
@@ -98,36 +108,106 @@ export function TransactionList() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search transactions..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-            className="pl-9"
-          />
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="relative min-w-[200px] flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search transactions..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(0);
+              }}
+              className="pl-9"
+            />
+          </div>
+          <Select
+            value={category}
+            onValueChange={(v) => {
+              if (v) {
+                setCategory(v);
+                setPage(0);
+              }
+            }}
+          >
+            <SelectTrigger className="w-full sm:w-[180px]">
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent>
+              {CATEGORIES.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={direction}
+            onValueChange={(v) => {
+              if (v) {
+                setDirection(v);
+                setPage(0);
+              }
+            }}
+          >
+            <SelectTrigger className="w-full sm:w-[140px]">
+              <SelectValue placeholder="Direction" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="debit">Expenses</SelectItem>
+              <SelectItem value="credit">Income</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="txn-date-from" className="text-xs text-muted-foreground">
+                From
+              </Label>
+              <Input
+                id="txn-date-from"
+                type="date"
+                value={dateFrom}
+                onChange={(e) => {
+                  setDateFrom(e.target.value);
+                  setPage(0);
+                }}
+                className="w-full min-w-[9.5rem] sm:w-[9.5rem]"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="txn-date-to" className="text-xs text-muted-foreground">
+                To
+              </Label>
+              <Input
+                id="txn-date-to"
+                type="date"
+                value={dateTo}
+                onChange={(e) => {
+                  setDateTo(e.target.value);
+                  setPage(0);
+                }}
+                className="w-full min-w-[9.5rem] sm:w-[9.5rem]"
+              />
+            </div>
+            {(dateFrom || dateTo) && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mb-0.5 shrink-0"
+                onClick={() => {
+                  setDateFrom("");
+                  setDateTo("");
+                  setPage(0);
+                }}
+              >
+                Clear dates
+              </Button>
+            )}
+          </div>
         </div>
-        <Select value={category} onValueChange={(v) => { if (v) { setCategory(v); setPage(0); } }}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Category" />
-          </SelectTrigger>
-          <SelectContent>
-            {CATEGORIES.map((c) => (
-              <SelectItem key={c} value={c}>{c}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={direction} onValueChange={(v) => { if (v) { setDirection(v); setPage(0); } }}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="Direction" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All</SelectItem>
-            <SelectItem value="debit">Expenses</SelectItem>
-            <SelectItem value="credit">Income</SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
       <div className="space-y-2">
