@@ -1,5 +1,6 @@
 import {
   format,
+  parseISO,
   startOfMonth,
   endOfMonth,
   subMonths,
@@ -42,14 +43,15 @@ export function getPreviousWeek(): { start: string; end: string } {
   };
 }
 
+/** `date` is YYYY-MM-DD from the DB — use parseISO so the calendar day is not shifted by UTC (new Date("YYYY-MM-DD") is UTC midnight). */
 export function formatDate(date: string): string {
-  return format(new Date(date), "d MMM yyyy");
+  return format(parseISO(date), "d MMM yyyy");
 }
 
 export function formatShortDate(date: string): string {
-  return format(new Date(date), "d MMM");
+  return format(parseISO(date), "d MMM");
 }
 
 export function getMonthLabel(date: string): string {
-  return format(new Date(date), "MMM yyyy");
+  return format(parseISO(date), "MMM yyyy");
 }
