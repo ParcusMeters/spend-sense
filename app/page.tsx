@@ -1,7 +1,12 @@
 export const dynamic = "force-dynamic";
 
 import { createServiceClient } from "@/lib/supabase/server";
-import { getCurrentMonth, getLastNMonths, getMonthLabel } from "@/lib/utils/dates";
+import {
+  getCurrentMonth,
+  getLastNMonths,
+  getMonthLabel,
+  transactionMonthKey,
+} from "@/lib/utils/dates";
 import { BalanceCards } from "@/components/dashboard/BalanceCards";
 import { MonthlyTrend } from "@/components/dashboard/MonthlyTrend";
 import { SpendingChart } from "@/components/dashboard/SpendingChart";
@@ -175,10 +180,11 @@ async function DashboardContent() {
   const monthIncomeMap: Record<string, number> = {};
   const monthSpendMap: Record<string, Record<string, number>> = {};
   const monthCategoryTotals: Record<string, number> = {};
+  const monthKeySet = new Set(monthKeys);
 
   for (const t of trendTxns ?? []) {
-    const monthKey = t.date.slice(0, 7);
-    if (!monthKeys.includes(monthKey)) continue;
+    const monthKey = transactionMonthKey(t.date);
+    if (!monthKey || !monthKeySet.has(monthKey)) continue;
     const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category ?? "Other";
     if (isTransferCategory(cat)) continue;
 
@@ -207,7 +213,8 @@ async function DashboardContent() {
 
   const monthlyTrendData = monthKeys.map((monthKey) => {
     const row: Record<string, string | number> = {
-      month: getMonthLabel(`${monthKey}-01`),
+      monthKey,
+      monthLabel: getMonthLabel(`${monthKey}-01`),
       income: monthIncomeMap[monthKey] ?? 0,
     };
     const spendForMonth = monthSpendMap[monthKey] ?? {};
@@ -223,7 +230,8 @@ async function DashboardContent() {
 
   const monthlyData: Record<string, { income: number; spending: number }> = {};
   for (const t of allTxns ?? []) {
-    const m = t.date.slice(0, 7);
+    const m = transactionMonthKey(t.date);
+    if (!m) continue;
     if (!monthlyData[m]) monthlyData[m] = { income: 0, spending: 0 };
     const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category;
     if (isTransferCategory(cat)) continue;

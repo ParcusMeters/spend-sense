@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getMonthLabel } from "@/lib/utils/dates";
 import {
   BarChart,
   Bar,
@@ -23,6 +24,8 @@ interface TrendTooltipEntry {
   name?: string | number;
   value?: string | number | null;
   color?: string;
+  /** Full chart row (Recharts) */
+  payload?: Record<string, unknown>;
 }
 
 interface TrendTooltipProps {
@@ -37,9 +40,16 @@ function MonthlyTrendTooltip({ active, label, payload }: TrendTooltipProps) {
   const nonZero = payload.filter((p) => Number(p.value ?? 0) > 0);
   if (nonZero.length === 0) return null;
 
+  const row = payload[0]?.payload as { monthLabel?: string; monthKey?: string } | undefined;
+  const header =
+    row?.monthLabel ??
+    (typeof row?.monthKey === "string" && /^\d{4}-\d{2}$/.test(row.monthKey)
+      ? getMonthLabel(`${row.monthKey}-01`)
+      : String(label ?? ""));
+
   return (
     <div className="rounded-lg border bg-card p-2 text-xs shadow-sm">
-      <p className="mb-1 font-medium">{String(label)}</p>
+      <p className="mb-1 font-medium">{header}</p>
       <div className="space-y-1">
         {nonZero.map((p) => (
           <div key={String(p.name)} className="flex items-center justify-between gap-3">
@@ -126,7 +136,13 @@ export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
               >
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                 <XAxis
-                  dataKey="month"
+                  type="category"
+                  dataKey="monthKey"
+                  tickFormatter={(mk) =>
+                    typeof mk === "string" && /^\d{4}-\d{2}$/.test(mk)
+                      ? getMonthLabel(`${mk}-01`)
+                      : String(mk ?? "")
+                  }
                   className="text-xs"
                   tick={{ fill: "var(--muted-foreground)" }}
                 />

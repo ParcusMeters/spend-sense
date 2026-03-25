@@ -55,3 +55,11 @@ export function formatShortDate(date: string): string {
 export function getMonthLabel(date: string): string {
   return format(parseISO(date), "MMM yyyy");
 }
+
+/** First calendar month from a DB / ISO date string (`YYYY-MM-DD…`). */
+export function transactionMonthKey(dateStr: string | null | undefined): string | null {
+  if (!dateStr || typeof dateStr !== "string") return null;
+  const m = dateStr.match(/^(\d{4})-(\d{2})-\d{2}/);
+  if (!m) return null;
+  return `${m[1]}-${m[2]}`;
+}
