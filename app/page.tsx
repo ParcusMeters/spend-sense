@@ -332,26 +332,27 @@ async function DashboardContent() {
         netSaved={incomeThisMonth - spendingThisMonth}
       />
 
-      <Card className="w-full">
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            Monthly Recurring Payments
-          </CardTitle>
-          <div className="rounded-lg bg-purple-50 p-2 dark:bg-purple-950">
-            <Repeat className="h-4 w-4 text-purple-600 dark:text-purple-400" />
-          </div>
-        </CardHeader>
-        <CardContent>
-          <p className="text-2xl font-bold">
-            {formatCurrency(recurringSpendingThisMonth)}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Total recurring debit payments detected this month.
-          </p>
-        </CardContent>
-      </Card>
-
-      <SpendingChart data={spendingByCategory} />
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <SpendingChart data={spendingByCategory} />
+        <Card className="min-w-0">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Monthly Recurring Payments
+            </CardTitle>
+            <div className="rounded-lg bg-purple-50 p-2 dark:bg-purple-950">
+              <Repeat className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">
+              {formatCurrency(recurringSpendingThisMonth)}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Total recurring debit payments detected this month.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
 
       <MonthlyTrend data={monthlyTrendData} categories={monthlyTrendCategories} />
 
