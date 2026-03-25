@@ -17,8 +17,10 @@ interface DailyCategory {
 }
 
 interface DailySpendingCategoryChartProps {
+  title?: string;
   data: Record<string, string | number>[];
   categories: DailyCategory[];
+  onDayClick?: (isoDate: string) => void;
 }
 
 interface DailyTooltipEntry {
@@ -65,10 +67,12 @@ function DailyTooltip({ active, label, payload }: DailyTooltipProps) {
 }
 
 export function DailySpendingCategoryChart({
+  title = "Daily Spending by Category",
   data,
   categories,
+  onDayClick,
 }: DailySpendingCategoryChartProps) {
-  const hasData = data.length > 0 && categories.length > 0;
+  const hasData = data.length > 0;
   const chartWidth = Math.max(760, data.length * 56);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const chartHeight = 320;
@@ -90,17 +94,33 @@ export function DailySpendingCategoryChart({
     if (!el || !hasData) return;
     // Default view should show latest days on the right.
     el.scrollLeft = el.scrollWidth;
-  }, [hasData, data.length, categories.length]);
+  }, [hasData, data.length, categories.length, title]);
+
+  function handleDayBarClick(_: unknown, index: number) {
+    if (!onDayClick) return;
+    const row = data[index];
+    const d = row?.date;
+    if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) onDayClick(d);
+  }
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Daily Spending by Category</CardTitle>
+        <CardTitle>{title}</CardTitle>
+        {onDayClick && (
+          <p className="text-xs font-normal text-muted-foreground">
+            Click a day to open transactions filtered to that date.
+          </p>
+        )}
       </CardHeader>
       <CardContent>
         {!hasData ? (
           <p className="py-12 text-center text-sm text-muted-foreground">
             No daily spending data to display yet.
+          </p>
+        ) : categories.length === 0 ? (
+          <p className="py-12 text-center text-sm text-muted-foreground">
+            No debit spending in this period.
           </p>
         ) : (
           <div className="flex gap-2">
@@ -139,6 +159,8 @@ export function DailySpendingCategoryChart({
                     name={c.name}
                     stackId="spend"
                     fill={c.color}
+                    cursor={onDayClick ? "pointer" : "default"}
+                    onClick={onDayClick ? handleDayBarClick : undefined}
                   />
                 ))}
               </BarChart>

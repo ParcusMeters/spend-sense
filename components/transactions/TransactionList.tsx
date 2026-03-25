@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,17 +36,29 @@ interface TransactionWithAccount extends Transaction {
 }
 
 export function TransactionList() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const fromParam = searchParams.get("from") ?? "";
+  const toParam = searchParams.get("to") ?? "";
+
   const [transactions, setTransactions] = useState<TransactionWithAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [direction, setDirection] = useState("all");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState(fromParam);
+  const [dateTo, setDateTo] = useState(toParam);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
 
   const supabase = createClient();
+
+  useEffect(() => {
+    setDateFrom(fromParam);
+    setDateTo(toParam);
+    setPage(0);
+  }, [fromParam, toParam]);
 
   const fetchTransactions = useCallback(async () => {
     setLoading(true);
@@ -201,6 +214,7 @@ export function TransactionList() {
                   setDateFrom("");
                   setDateTo("");
                   setPage(0);
+                  router.replace(pathname);
                 }}
               >
                 Clear dates

@@ -5,6 +5,7 @@ import { getMonthLabel } from "@/lib/utils/dates";
 import {
   BarChart,
   Bar,
+  Cell,
   XAxis,
   CartesianGrid,
   Tooltip,
@@ -18,6 +19,9 @@ interface MonthlyTrendProps {
     name: string;
     color: string;
   }[];
+  /** When set, non-matching months are dimmed; click toggles selection in parent. */
+  selectedMonthKey?: string | null;
+  onMonthClick?: (monthKey: string) => void;
 }
 
 interface TrendTooltipEntry {
@@ -80,9 +84,25 @@ const CHART_FLOOR_WIDTH = 560;
 /** Fixed pixel gap between month groups (not %) so bar thickness stays driven by minWidth ÷ months. */
 const BAR_CATEGORY_GAP_PX = 20;
 
-export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
+export function MonthlyTrend({
+  data,
+  categories,
+  selectedMonthKey = null,
+  onMonthClick,
+}: MonthlyTrendProps) {
   const hasData = data.length > 0;
   const chartMinWidth = Math.max(CHART_FLOOR_WIDTH, data.length * PX_PER_MONTH);
+
+  function barOpacityForIndex(index: number): number {
+    const mk = data[index]?.monthKey;
+    if (!selectedMonthKey || typeof mk !== "string") return 1;
+    return mk === selectedMonthKey ? 1 : 0.35;
+  }
+
+  function handleMonthBarClick(_: unknown, index: number) {
+    const mk = data[index]?.monthKey;
+    if (typeof mk === "string" && onMonthClick) onMonthClick(mk);
+  }
 
   const maxMonthlyCents = data.reduce((max, row) => {
     const income = Number(row.income ?? 0);
@@ -102,6 +122,11 @@ export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
     <Card className="w-full min-w-0">
       <CardHeader>
         <CardTitle>Income vs Spending</CardTitle>
+        {onMonthClick && (
+          <p className="text-xs font-normal text-muted-foreground">
+            Click a month to show its daily spending below. Click again to clear.
+          </p>
+        )}
       </CardHeader>
       <CardContent className="min-w-0">
         {!hasData ? (
@@ -158,7 +183,13 @@ export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
                       name="Income"
                       fill="hsl(152, 69%, 31%)"
                       radius={[4, 4, 0, 0]}
-                    />
+                      cursor={onMonthClick ? "pointer" : "default"}
+                      onClick={onMonthClick ? handleMonthBarClick : undefined}
+                    >
+                      {data.map((_, index) => (
+                        <Cell key={`income-${index}`} fillOpacity={barOpacityForIndex(index)} />
+                      ))}
+                    </Bar>
                     {categories.map((c) => (
                       <Bar
                         key={c.key}
@@ -167,7 +198,13 @@ export function MonthlyTrend({ data, categories }: MonthlyTrendProps) {
                         stackId="spending"
                         fill={c.color}
                         radius={[0, 0, 0, 0]}
-                      />
+                        cursor={onMonthClick ? "pointer" : "default"}
+                        onClick={onMonthClick ? handleMonthBarClick : undefined}
+                      >
+                        {data.map((_, index) => (
+                          <Cell key={`${c.key}-${index}`} fillOpacity={barOpacityForIndex(index)} />
+                        ))}
+                      </Bar>
                     ))}
                   </BarChart>
                 </ResponsiveContainer>
