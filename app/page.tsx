@@ -43,13 +43,7 @@ async function DashboardContent() {
 
   const txns = monthTxns ?? [];
   const incomeThisMonth = txns
-    .filter(
-      (t) =>
-        t.direction === "credit" &&
-        !isTransferCategory(
-          t.ai_category ?? t.user_category_override ?? t.redbark_category
-        )
-    )
+    .filter((t) => t.direction === "credit" && t.ai_category === "Salary")
     .reduce((sum, t) => sum + t.amount_cents, 0);
 
   const spendingThisMonth = txns
@@ -198,9 +192,9 @@ async function DashboardContent() {
     const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category ?? "Other";
     if (isTransferCategory(cat)) continue;
 
-    if (t.direction === "credit") {
+    if (t.direction === "credit" && cat === "Salary") {
       monthIncomeMap[monthKey] = (monthIncomeMap[monthKey] ?? 0) + t.amount_cents;
-    } else {
+    } else if (t.direction === "debit") {
       if (!monthSpendMap[monthKey]) monthSpendMap[monthKey] = {};
       monthSpendMap[monthKey][cat] =
         (monthSpendMap[monthKey][cat] ?? 0) + Math.abs(t.amount_cents);
@@ -245,9 +239,9 @@ async function DashboardContent() {
     if (!monthlyData[m]) monthlyData[m] = { income: 0, spending: 0 };
     const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category;
     if (isTransferCategory(cat)) continue;
-    if (t.direction === "credit") {
+    if (t.direction === "credit" && cat === "Salary") {
       monthlyData[m].income += t.amount_cents;
-    } else {
+    } else if (t.direction === "debit") {
       monthlyData[m].spending += Math.abs(t.amount_cents);
     }
   }

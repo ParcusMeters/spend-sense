@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
       .filter((t) => t.direction === "debit")
       .reduce((s, t) => s + Math.abs(t.amount_cents), 0);
     const totalIncome = txns
-      .filter((t) => t.direction === "credit" && t.ai_category !== "Transfers")
+      .filter((t) => t.direction === "credit" && t.ai_category === "Salary")
       .reduce((s, t) => s + t.amount_cents, 0);
 
     const categoryTotals: Record<string, number> = {};

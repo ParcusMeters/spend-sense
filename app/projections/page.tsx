@@ -20,11 +20,11 @@ async function ProjectionsContent() {
   for (const t of txns ?? []) {
     const m = t.date.slice(0, 7);
     if (!monthlyData[m]) monthlyData[m] = { income: 0, spending: 0 };
-    const cat = t.user_category_override ?? t.redbark_category;
+    const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category;
     if (cat === "Transfers") continue;
-    if (t.direction === "credit") {
+    if (t.direction === "credit" && cat === "Salary") {
       monthlyData[m].income += t.amount_cents;
-    } else {
+    } else if (t.direction === "debit") {
       monthlyData[m].spending += Math.abs(t.amount_cents);
     }
   }

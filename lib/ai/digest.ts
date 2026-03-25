@@ -78,7 +78,7 @@ export async function generateDigest(
   const credits = transactions.filter((t) => t.direction === "credit");
   const totalSpending = debits.reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
   const totalIncome = credits
-    .filter((t) => !["Transfers"].includes(t.ai_category ?? ""))
+    .filter((t) => t.ai_category === "Salary")
     .reduce((sum, t) => sum + t.amount_cents, 0);
 
   const categoryTotals: Record<string, number> = {};
