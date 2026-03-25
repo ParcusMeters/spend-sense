@@ -16,6 +16,8 @@ interface TrendAndDailySectionProps {
   trendTxns: TrendTxnLite[];
   initialDailyData: Record<string, string | number>[];
   initialDailyCategories: TrendCategory[];
+  monthlyBudgetCents?: number | null;
+  dailyBudgetCents?: number | null;
 }
 
 export function TrendAndDailySection({
@@ -24,6 +26,8 @@ export function TrendAndDailySection({
   trendTxns,
   initialDailyData,
   initialDailyCategories,
+  monthlyBudgetCents,
+  dailyBudgetCents,
 }: TrendAndDailySectionProps) {
   const router = useRouter();
 
@@ -54,6 +58,7 @@ export function TrendAndDailySection({
         onMonthClick={(monthKey) => {
           setSelectedMonthKey((prev) => (prev === monthKey ? null : monthKey));
         }}
+        budgetCents={monthlyBudgetCents ?? undefined}
       />
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -77,6 +82,7 @@ export function TrendAndDailySection({
           title={dailyTitle}
           data={displayDailyData}
           categories={displayDailyCategories}
+          budgetCents={dailyBudgetCents ?? undefined}
           onDayClick={(isoDate) => {
             const q = new URLSearchParams({ from: isoDate, to: isoDate });
             router.push(`/transactions?${q.toString()}`);

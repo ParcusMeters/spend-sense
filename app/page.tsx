@@ -280,6 +280,16 @@ async function DashboardContent() {
     };
   });
 
+  // Spending budget for chart reference lines
+  const { data: budgetRow } = await supabase
+    .from("spending_budgets")
+    .select("weekly_limit_cents")
+    .limit(1)
+    .maybeSingle();
+  const weeklyBudgetCents = budgetRow?.weekly_limit_cents ?? null;
+  const monthlyBudgetCents = weeklyBudgetCents ? Math.round(weeklyBudgetCents * 4.33) : null;
+  const dailyBudgetCents = weeklyBudgetCents ? Math.round(weeklyBudgetCents / 7) : null;
+
   // Recent transactions
   const { data: recentTxns } = await supabase
     .from("transactions")
@@ -337,6 +347,8 @@ async function DashboardContent() {
         trendTxns={trendTxns}
         initialDailyData={dailySpendingData}
         initialDailyCategories={dailyCategories}
+        monthlyBudgetCents={monthlyBudgetCents}
+        dailyBudgetCents={dailyBudgetCents}
       />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

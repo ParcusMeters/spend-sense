@@ -10,6 +10,7 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  ReferenceLine,
 } from "recharts";
 
 interface MonthlyTrendProps {
@@ -22,6 +23,8 @@ interface MonthlyTrendProps {
   /** When set, non-matching months are dimmed; click toggles selection in parent. */
   selectedMonthKey?: string | null;
   onMonthClick?: (monthKey: string) => void;
+  /** Monthly spending budget in cents — shown as a dashed reference line. */
+  budgetCents?: number;
 }
 
 interface TrendTooltipEntry {
@@ -89,6 +92,7 @@ export function MonthlyTrend({
   categories,
   selectedMonthKey = null,
   onMonthClick,
+  budgetCents,
 }: MonthlyTrendProps) {
   const hasData = data.length > 0;
   const chartMinWidth = Math.max(CHART_FLOOR_WIDTH, data.length * PX_PER_MONTH);
@@ -112,8 +116,9 @@ export function MonthlyTrend({
     );
     return Math.max(max, income, spending);
   }, 0);
+  const ceilTarget = Math.max(maxMonthlyCents, budgetCents ?? 0);
   const niceMaxCents =
-    maxMonthlyCents > 0 ? Math.ceil(maxMonthlyCents / 50000) * 50000 : 100000;
+    ceilTarget > 0 ? Math.ceil(ceilTarget / 50000) * 50000 : 100000;
   const yTicks = Array.from({ length: 5 }, (_, i) =>
     Math.round(niceMaxCents - (niceMaxCents * i) / 4)
   );
@@ -178,6 +183,21 @@ export function MonthlyTrend({
                       tick={{ fill: "var(--muted-foreground)" }}
                     />
                     <Tooltip content={<MonthlyTrendTooltip />} />
+                    {budgetCents && budgetCents > 0 && (
+                      <ReferenceLine
+                        y={budgetCents}
+                        stroke="hsl(0, 72%, 51%)"
+                        strokeDasharray="6 4"
+                        strokeWidth={2}
+                        label={{
+                          value: `Budget $${Math.round(budgetCents / 100).toLocaleString()}`,
+                          position: "right",
+                          fill: "hsl(0, 72%, 51%)",
+                          fontSize: 11,
+                          fontWeight: 600,
+                        }}
+                      />
+                    )}
                     <Bar
                       dataKey="income"
                       name="Income"

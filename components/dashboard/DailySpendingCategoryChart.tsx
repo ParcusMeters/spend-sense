@@ -6,6 +6,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  ReferenceLine,
   Tooltip,
   XAxis,
 } from "recharts";
@@ -20,6 +21,8 @@ interface DailySpendingCategoryChartProps {
   title?: string;
   data: Record<string, string | number>[];
   categories: DailyCategory[];
+  /** Daily spending budget in cents — shown as a dashed reference line. */
+  budgetCents?: number;
   onDayClick?: (isoDate: string) => void;
 }
 
@@ -70,6 +73,7 @@ export function DailySpendingCategoryChart({
   title = "Daily Spending by Category",
   data,
   categories,
+  budgetCents,
   onDayClick,
 }: DailySpendingCategoryChartProps) {
   const hasData = data.length > 0;
@@ -84,7 +88,8 @@ export function DailySpendingCategoryChart({
     );
     return Math.max(max, total);
   }, 0);
-  const niceMaxCents = maxDailyCents > 0 ? Math.ceil(maxDailyCents / 5000) * 5000 : 10000;
+  const dailyCeil = Math.max(maxDailyCents, budgetCents ?? 0);
+  const niceMaxCents = dailyCeil > 0 ? Math.ceil(dailyCeil / 5000) * 5000 : 10000;
   const yTicks = Array.from({ length: 5 }, (_, i) =>
     Math.round(niceMaxCents - (niceMaxCents * i) / 4)
   );
@@ -163,6 +168,21 @@ export function DailySpendingCategoryChart({
                   tick={{ fill: "var(--muted-foreground)" }}
                 />
                 <Tooltip content={<DailyTooltip />} />
+                {budgetCents && budgetCents > 0 && (
+                  <ReferenceLine
+                    y={budgetCents}
+                    stroke="hsl(0, 72%, 51%)"
+                    strokeDasharray="6 4"
+                    strokeWidth={2}
+                    label={{
+                      value: `Budget $${Math.round(budgetCents / 100)}`,
+                      position: "right",
+                      fill: "hsl(0, 72%, 51%)",
+                      fontSize: 11,
+                      fontWeight: 600,
+                    }}
+                  />
+                )}
                 {categories.map((c) => (
                   <Bar
                     key={c.key}
