@@ -87,6 +87,37 @@ async function fetchBalancesForIds(
   return map;
 }
 
+export async function fetchRedbarkTotalBalanceCents(): Promise<number | null> {
+  const apiKey = process.env.REDBARK_API_KEY?.trim();
+  if (!apiKey) return null;
+
+  try {
+    const rbAccounts = await listAllAccounts(apiKey);
+    if (rbAccounts.length === 0) return 0;
+
+    const balanceById = await fetchBalancesForIds(
+      apiKey,
+      rbAccounts.map((a) => a.id)
+    );
+
+    let totalCents = 0;
+    for (const acc of rbAccounts) {
+      const bal = balanceById.get(acc.id);
+      if (!bal) continue;
+
+      const balanceDollars = Number.parseFloat(bal.currentBalance);
+      if (!Number.isFinite(balanceDollars)) continue;
+      totalCents += Math.round(balanceDollars * 100);
+    }
+
+    return totalCents;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("fetchRedbarkTotalBalanceCents:", message);
+    return null;
+  }
+}
+
 /**
  * Pulls live balances from Redbark REST API and upserts `accounts` in Supabase.
  * No-op if REDBARK_API_KEY is unset (webhook-only setups keep using manual DB balances).

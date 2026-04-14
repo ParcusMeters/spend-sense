@@ -76,7 +76,11 @@ export async function generateDigest(
 
   const debits = transactions.filter((t) => t.direction === "debit");
   const credits = transactions.filter((t) => t.direction === "credit");
-  const totalSpending = debits.reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
+  const grossSpending = debits.reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
+  const reimbursements = credits
+    .filter((t) => t.ai_category === "Reimbursements")
+    .reduce((sum, t) => sum + t.amount_cents, 0);
+  const totalSpending = grossSpending - reimbursements;
   const totalIncome = credits
     .filter((t) => t.ai_category === "Salary")
     .reduce((sum, t) => sum + t.amount_cents, 0);

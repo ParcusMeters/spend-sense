@@ -27,6 +27,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
   Travel: "#5DCAA5",
   "Bank fees": "#B4B2A9",
   Investing: "#1D9E75",
+  Reimbursements: "#60C9DB",
   Other: "#888780",
 };
 
@@ -34,6 +35,11 @@ export function isTransferCategory(category: string | null | undefined): boolean
   if (!category) return false;
   const value = category.toLowerCase();
   return value.includes("transfer") || value.includes("xfer");
+}
+
+export function isReimbursementCategory(category: string | null | undefined): boolean {
+  if (!category) return false;
+  return category.toLowerCase() === "reimbursements";
 }
 
 export function getCategoryColor(name: string): string {

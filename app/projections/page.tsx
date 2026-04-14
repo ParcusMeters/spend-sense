@@ -24,6 +24,8 @@ async function ProjectionsContent() {
     if (cat === "Transfers") continue;
     if (t.direction === "credit" && cat === "Salary") {
       monthlyData[m].income += t.amount_cents;
+    } else if (t.direction === "credit" && cat === "Reimbursements") {
+      monthlyData[m].spending -= t.amount_cents;
     } else if (t.direction === "debit") {
       monthlyData[m].spending += Math.abs(t.amount_cents);
     }

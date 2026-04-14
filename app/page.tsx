@@ -14,6 +14,7 @@ import { SpendingChart } from "@/components/dashboard/SpendingChart";
 import {
   getCategoryColor,
   isTransferCategory,
+  isReimbursementCategory,
   buildDailySpendingChartData,
 } from "@/lib/dashboard/spending-chart-data";
 import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
@@ -24,7 +25,10 @@ import { format, addMonths, startOfMonth, getDay, getDate, getDaysInMonth } from
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Repeat } from "lucide-react";
 import { formatCurrency } from "@/lib/utils/currency";
-import { syncRedbarkBalancesToDatabase } from "@/lib/redbark/sync-balances";
+import {
+  fetchRedbarkTotalBalanceCents,
+  syncRedbarkBalancesToDatabase,
+} from "@/lib/redbark/sync-balances";
 import { SpendingGoalTracker } from "@/components/dashboard/SpendingGoalTracker";
 import { getCurrentWeek } from "@/lib/utils/dates";
 
@@ -46,7 +50,7 @@ async function DashboardContent() {
     .filter((t) => t.direction === "credit" && t.ai_category === "Salary")
     .reduce((sum, t) => sum + t.amount_cents, 0);
 
-  const spendingThisMonth = txns
+  const grossSpendingThisMonth = txns
     .filter(
       (t) =>
         t.direction === "debit" &&
@@ -55,6 +59,16 @@ async function DashboardContent() {
         )
     )
     .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
+
+  const reimbursementsThisMonth = txns
+    .filter(
+      (t) =>
+        t.direction === "credit" &&
+        isReimbursementCategory(t.ai_category ?? t.user_category_override)
+    )
+    .reduce((sum, t) => sum + t.amount_cents, 0);
+
+  const spendingThisMonth = grossSpendingThisMonth - reimbursementsThisMonth;
 
   const recurringSpendingThisMonth = txns
     .filter(
@@ -75,13 +89,23 @@ async function DashboardContent() {
     .gte("date", weekStart)
     .lte("date", weekEnd);
 
-  const weeklySpending = (weekTxns ?? [])
+  const grossWeeklySpending = (weekTxns ?? [])
     .filter(
       (t) =>
         t.direction === "debit" &&
         !isTransferCategory(t.ai_category ?? t.user_category_override ?? t.redbark_category)
     )
     .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
+
+  const weeklyReimbursements = (weekTxns ?? [])
+    .filter(
+      (t) =>
+        t.direction === "credit" &&
+        isReimbursementCategory(t.ai_category ?? t.user_category_override)
+    )
+    .reduce((sum, t) => sum + t.amount_cents, 0);
+
+  const weeklySpending = grossWeeklySpending - weeklyReimbursements;
 
   // Days into week (Mon=1 .. Sun=7)
   const today = new Date();
@@ -90,12 +114,14 @@ async function DashboardContent() {
   const daysIntoMonth = getDate(today);
   const daysInMonth = getDaysInMonth(today);
 
-  // Fetch account balances
+  // Fetch account balances (prefer live Redbark total, fallback to local snapshot)
+  const liveTotalBalance = await fetchRedbarkTotalBalanceCents();
   const { data: accounts } = await supabase.from("accounts").select("balance");
-  const totalBalance = (accounts ?? []).reduce(
+  const fallbackTotalBalance = (accounts ?? []).reduce(
     (sum, a) => sum + Number(a.balance) * 100,
     0
   );
+  const totalBalance = liveTotalBalance ?? fallbackTotalBalance;
 
   // Spending by category (last 6 months) - computed from `allTxns` below.
   let spendingByCategory: { name: string; value: number; color: string }[] = [];
@@ -194,6 +220,13 @@ async function DashboardContent() {
 
     if (t.direction === "credit" && cat === "Salary") {
       monthIncomeMap[monthKey] = (monthIncomeMap[monthKey] ?? 0) + t.amount_cents;
+    } else if (t.direction === "credit" && isReimbursementCategory(cat)) {
+      // Reimbursements reduce the spending total — show as negative spending
+      if (!monthSpendMap[monthKey]) monthSpendMap[monthKey] = {};
+      monthSpendMap[monthKey][cat] =
+        (monthSpendMap[monthKey][cat] ?? 0) - t.amount_cents;
+      monthCategoryTotals[cat] =
+        (monthCategoryTotals[cat] ?? 0) - t.amount_cents;
     } else if (t.direction === "debit") {
       if (!monthSpendMap[monthKey]) monthSpendMap[monthKey] = {};
       monthSpendMap[monthKey][cat] =
@@ -241,6 +274,8 @@ async function DashboardContent() {
     if (isTransferCategory(cat)) continue;
     if (t.direction === "credit" && cat === "Salary") {
       monthlyData[m].income += t.amount_cents;
+    } else if (t.direction === "credit" && isReimbursementCategory(cat)) {
+      monthlyData[m].spending -= t.amount_cents;
     } else if (t.direction === "debit") {
       monthlyData[m].spending += Math.abs(t.amount_cents);
     }

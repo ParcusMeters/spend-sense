@@ -53,9 +53,13 @@ export async function POST(request: NextRequest) {
 
     // Build concise financial context
     const txns = recentTransactions ?? [];
-    const totalSpending = txns
+    const grossSpending = txns
       .filter((t) => t.direction === "debit")
       .reduce((s, t) => s + Math.abs(t.amount_cents), 0);
+    const reimbursements = txns
+      .filter((t) => t.direction === "credit" && t.ai_category === "Reimbursements")
+      .reduce((s, t) => s + t.amount_cents, 0);
+    const totalSpending = grossSpending - reimbursements;
     const totalIncome = txns
       .filter((t) => t.direction === "credit" && t.ai_category === "Salary")
       .reduce((s, t) => s + t.amount_cents, 0);

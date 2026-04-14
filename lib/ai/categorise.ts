@@ -15,6 +15,7 @@ const CATEGORIES = [
   "Travel",
   "Bank fees",
   "Transfers",
+  "Reimbursements",
   "Investing",
   "Other",
 ] as const;
@@ -69,6 +70,15 @@ Rules:
 - is_recurring is true or false
 - merchant_clean must be a single line string (no newlines), max 40 chars, and must NOT include quotation marks
 - any transaction with transaction details including "Revolut" should be set to category "Travel"
+
+Salary vs Transfers (important):
+- "Salary" is ONLY for income paid by an employer or external party (wages, salary, freelance payments, government benefits). The description usually contains a company/business name and keywords like "payroll", "salary", "wages", or a recognisable employer name.
+- "Transfers" is for money moving between the user's OWN accounts (e.g. savings ↔ everyday, Revolut top-ups, moving money between banks). Look for generic descriptions like "Transfer", "Direct Credit", account numbers, or the user's own name.
+- When a credit transaction is ambiguous and could be either, prefer "Transfers" over "Salary". Only use "Salary" when you are reasonably confident it is external income.
+
+Reimbursements:
+- "Reimbursements" is for credit transactions where someone (a friend, colleague, or individual) is paying the user back for a shared expense. Look for PayID payments from individual names, bank transfers with personal names, or small-to-medium credits that look like splitting bills, rent, travel, or group bookings.
+- Do NOT use "Reimbursements" for refunds from businesses — those should be categorised the same as the original purchase (e.g. a refund from a shop is "Shopping").
 
 Recurring detection rule (important):
 - Set is_recurring = true ONLY when this looks like a subscription you have signed up for.
