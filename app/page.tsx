@@ -31,6 +31,7 @@ import {
 } from "@/lib/redbark/sync-balances";
 import { SpendingGoalTracker } from "@/components/dashboard/SpendingGoalTracker";
 import { getCurrentWeek } from "@/lib/utils/dates";
+import { RunCategoriseButton } from "@/components/dashboard/RunCategoriseButton";
 
 async function DashboardContent() {
   const supabase = createServiceClient();
@@ -329,8 +330,13 @@ async function DashboardContent() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">Your financial overview</p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold">Dashboard</h1>
+            <p className="text-muted-foreground">Your financial overview</p>
+          </div>
+          <RunCategoriseButton />
+        </div>
       </div>
 
       <BalanceCards
