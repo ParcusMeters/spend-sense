@@ -6,6 +6,7 @@ export async function POST(request: Request) {
 
   const expectedPassword = process.env.APP_LOGIN_PASSWORD;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const normalizedAppUrl = appUrl.replace(/\/+$/, "");
 
   if (!expectedPassword) {
     return NextResponse.json(
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
   const { error } = await supabase.auth.signInWithOtp({
     email: email.trim().toLowerCase(),
     options: {
-      emailRedirectTo: `${appUrl}/`,
+      emailRedirectTo: `${normalizedAppUrl}/`,
     },
   });
 
