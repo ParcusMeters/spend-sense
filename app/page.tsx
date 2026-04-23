@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 
-import { createServiceClient } from "@/lib/supabase/server";
+import { createUserClient } from "@/lib/supabase/server";
 import {
   getCurrentMonth,
   getLastNMonths,
@@ -34,8 +34,9 @@ import { getCurrentWeek } from "@/lib/utils/dates";
 import { RunCategoriseButton } from "@/components/dashboard/RunCategoriseButton";
 
 async function DashboardContent() {
-  const supabase = createServiceClient();
-  await syncRedbarkBalancesToDatabase(supabase);
+  const supabase = await createUserClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  await syncRedbarkBalancesToDatabase(supabase, user?.id);
   const { start: monthStart, end: monthEnd } = getCurrentMonth();
   const { start: sixMonthStart } = getLastNMonths(6);
 

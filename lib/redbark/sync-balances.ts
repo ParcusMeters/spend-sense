@@ -123,7 +123,8 @@ export async function fetchRedbarkTotalBalanceCents(): Promise<number | null> {
  * No-op if REDBARK_API_KEY is unset (webhook-only setups keep using manual DB balances).
  */
 export async function syncRedbarkBalancesToDatabase(
-  supabase: SupabaseClient
+  supabase: SupabaseClient,
+  userId?: string
 ): Promise<{ updated: number; error?: string }> {
   const apiKey = process.env.REDBARK_API_KEY?.trim();
   if (!apiKey) {
@@ -196,18 +197,21 @@ export async function syncRedbarkBalancesToDatabase(
         }
         updated++;
       } else {
+        const upsertRow: Record<string, unknown> = {
+          redbark_account_id: acc.id,
+          redbark_name: acc.name,
+          institution,
+          type,
+          balance: balanceDollars,
+          currency,
+          last_synced_at: now,
+          updated_at: now,
+        };
+        if (userId) upsertRow.user_id = userId;
+
         const { error } = await supabase.from("accounts").upsert(
-          {
-            redbark_account_id: acc.id,
-            redbark_name: acc.name,
-            institution,
-            type,
-            balance: balanceDollars,
-            currency,
-            last_synced_at: now,
-            updated_at: now,
-          },
-          { onConflict: "redbark_name" }
+          upsertRow,
+          { onConflict: userId ? "redbark_name,user_id" : "redbark_name" }
         );
 
         if (error) {

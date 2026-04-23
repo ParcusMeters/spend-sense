@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase/server";
+import { createUserClient } from "@/lib/supabase/server";
 
 export async function GET() {
-  const supabase = createServiceClient();
+  const supabase = await createUserClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { data, error } = await supabase
     .from("spending_budgets")
     .select("*")
+    .eq("user_id", user.id)
     .limit(1)
     .maybeSingle();
 
@@ -17,17 +21,20 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
-  const supabase = createServiceClient();
+  const supabase = await createUserClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { weekly_limit_cents } = await req.json();
 
   if (typeof weekly_limit_cents !== "number" || weekly_limit_cents < 0) {
     return NextResponse.json({ error: "Invalid weekly_limit_cents" }, { status: 400 });
   }
 
-  // Check if a budget row exists
   const { data: existing } = await supabase
     .from("spending_budgets")
     .select("id")
+    .eq("user_id", user.id)
     .limit(1)
     .maybeSingle();
 
@@ -44,7 +51,7 @@ export async function PUT(req: NextRequest) {
   } else {
     const { data, error } = await supabase
       .from("spending_budgets")
-      .insert({ weekly_limit_cents })
+      .insert({ weekly_limit_cents, user_id: user.id })
       .select()
       .single();
 

@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 
-import { createServiceClient } from "@/lib/supabase/server";
+import { createUserClient } from "@/lib/supabase/server";
 import { AuthGate } from "@/components/auth/AuthGate";
 import {
   RecurringPayments,
@@ -8,7 +8,7 @@ import {
 } from "@/components/recurring/RecurringPayments";
 
 async function RecurringContent() {
-  const supabase = createServiceClient();
+  const supabase = await createUserClient();
 
   const { data: txns } = await supabase
     .from("transactions")

@@ -75,7 +75,8 @@ function txnPreview(t: RedbarkTransaction) {
 async function processTransactionsSyncedPayload(
   payload: TransactionsSyncedPayload,
   deliveryId: string,
-  userAgent: string
+  userAgent: string,
+  webhookUserId: string | null
 ) {
   const startedAt = Date.now();
   const dataNew = payload.data?.new ?? [];
@@ -114,6 +115,10 @@ async function processTransactionsSyncedPayload(
 
   const supabase = createServiceClient();
 
+  if (!webhookUserId) {
+    console.warn("redbark:webhook no user profile found for webhook secret", { deliveryId });
+  }
+
   const accountMap = new Map<string, string>();
   const allTransactions = [...dataNew, ...dataUpdated];
   const distinctAccountLabels = new Set<string>();
@@ -139,6 +144,7 @@ async function processTransactionsSyncedPayload(
         type,
         last_synced_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        user_id: webhookUserId,
       };
       if (txn.account_id) {
         row.redbark_account_id = txn.account_id;
@@ -146,7 +152,7 @@ async function processTransactionsSyncedPayload(
 
       const { data: account, error: accErr } = await supabase
         .from("accounts")
-        .upsert(row, { onConflict: "redbark_name" })
+        .upsert(row, { onConflict: "redbark_name,user_id" })
         .select("id")
         .single();
 
@@ -205,6 +211,7 @@ async function processTransactionsSyncedPayload(
           post_date: txn.post_date,
           raw_data: txn,
           ai_status: "pending",
+          user_id: webhookUserId,
         },
         { onConflict: "redbark_id" }
       );
@@ -261,7 +268,7 @@ async function processTransactionsSyncedPayload(
 
   if (shouldAutoCategorise) {
     try {
-      categoriseResult = await processPendingCategorisation();
+      categoriseResult = await processPendingCategorisation(supabase, webhookUserId ?? undefined);
     } catch (error) {
       console.error("redbark:webhook auto-categorise failed", {
         deliveryId,
@@ -291,7 +298,6 @@ export async function POST(request: NextRequest) {
   const timestamp = request.headers.get("x-redbark-timestamp") ?? "";
   const deliveryId = request.headers.get("x-redbark-delivery-id") ?? "";
   const userAgent = request.headers.get("user-agent") ?? "";
-  const secret = process.env.REDBARK_WEBHOOK_SECRET!;
 
   let payload: TransactionsSyncedPayload;
   try {
@@ -305,12 +311,34 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (!verifyWebhook(rawBody, signature, timestamp, secret)) {
+  // Try to match the signature against all known user webhook secrets.
+  // This identifies both the sender AND verifies authenticity in one step.
+  const supabase = createServiceClient();
+  const { data: profiles } = await supabase
+    .from("user_profiles")
+    .select("user_id, redbark_webhook_secret")
+    .not("redbark_webhook_secret", "is", null);
+
+  let matchedUserId: string | null = null;
+  for (const profile of profiles ?? []) {
+    if (profile.redbark_webhook_secret && verifyWebhook(rawBody, signature, timestamp, profile.redbark_webhook_secret)) {
+      matchedUserId = profile.user_id;
+      break;
+    }
+  }
+
+  // Fall back to env var secret for backward compatibility (existing single-user setup)
+  const envSecret = process.env.REDBARK_WEBHOOK_SECRET;
+  if (!matchedUserId && envSecret && verifyWebhook(rawBody, signature, timestamp, envSecret)) {
+    // Signature valid but no user profile matched — data will be inserted with null user_id
+    matchedUserId = null;
+  } else if (!matchedUserId) {
     console.warn("redbark:webhook signature verification failed", {
       deliveryId,
       hasSignature: Boolean(signature),
       hasTimestamp: Boolean(timestamp),
       bodyBytes: rawBody.length,
+      knownSecretsChecked: (profiles ?? []).length,
     });
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
@@ -333,7 +361,7 @@ export async function POST(request: NextRequest) {
 
   after(async () => {
     try {
-      await processTransactionsSyncedPayload(payload, deliveryId, userAgent);
+      await processTransactionsSyncedPayload(payload, deliveryId, userAgent, matchedUserId);
     } catch (err) {
       console.error("redbark:webhook async processing failed", {
         deliveryId,

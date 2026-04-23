@@ -1,5 +1,5 @@
-import { createServiceClient } from "@/lib/supabase/server";
 import Anthropic from "@anthropic-ai/sdk";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 const anthropic = new Anthropic();
 
@@ -26,7 +26,7 @@ function extractJsonArray(candidate: string): string | null {
 }
 
 async function detectAnomaliesHeuristic(
-  supabase: ReturnType<typeof createServiceClient>,
+  supabase: SupabaseClient,
   transactionId: string,
   merchant: string | null,
   amountCents: number,
@@ -109,14 +109,13 @@ async function detectAnomaliesHeuristic(
 }
 
 async function detectAnomaliesAi(
-  supabase: ReturnType<typeof createServiceClient>,
+  supabase: SupabaseClient,
   transactionId: string,
   merchant: string | null,
   amountCents: number,
   date: string,
   isRecurring: boolean,
 ): Promise<AnomalyResult[]> {
-  // Pull transaction context (needed for unusual_merchant/unusual_time).
   const { data: txnRow } = await supabase
     .from("transactions")
     .select("id, account_id, description, merchant, amount_cents, date, direction")
@@ -130,9 +129,6 @@ async function detectAnomaliesAi(
   const absAmount = Math.abs(amountCents);
   const absAmountDollars = (absAmount / 100).toFixed(2);
 
-  // Overseas / international keywords are a noisy signal, but it is a
-  // strong "context" indicator for fraud-like anomalies.
-  // This intentionally errs on the side of being conservative.
   const overseasLikely =
     /(^|[^a-z])(intl|international|overseas|swift|wire|remittance)([^a-z]|$)/i.test(
       `${currentMerchant ?? ""} ${currentDescription}`,
@@ -141,7 +137,6 @@ async function detectAnomaliesAi(
       `${currentMerchant ?? ""} ${currentDescription}`,
     );
 
-  // Evidence: duplicates
   const { data: dupes } = currentMerchant
     ? await supabase
         .from("transactions")
@@ -154,7 +149,6 @@ async function detectAnomaliesAi(
 
   const duplicateLikely = Boolean(dupes && dupes.length > 0);
 
-  // Evidence: merchant amount history (last 20)
   let avg = null as number | null;
   let recentAmounts: number[] = [];
   if (currentMerchant) {
@@ -179,7 +173,6 @@ async function detectAnomaliesAi(
     absAmount > avg * 2 &&
     absAmount - avg > 2000;
 
-  // Evidence: previous recurring amount (last 1 for same merchant)
   let previousRecurringAmountCents: number | null = null;
   if (isRecurring && currentMerchant) {
     const { data: previous } = await supabase
@@ -199,7 +192,6 @@ async function detectAnomaliesAi(
   const subscriptionChangeLikely =
     previousRecurringAmountCents !== null && previousRecurringAmountCents !== amountCents;
 
-  // Evidence: unusual_merchant (merchant never seen for this account before)
   let unusualMerchantLikely = false;
   if (currentMerchant) {
     const { data: seen } = await supabase
@@ -210,14 +202,11 @@ async function detectAnomaliesAi(
       .neq("id", transactionId)
       .limit(1);
 
-    // "New merchant" alone is too sensitive; only treat as anomalous when
-    // there's also unusual spend size OR overseas context.
     unusualMerchantLikely =
       (!seen || seen.length === 0) && (unusualAmountLikely || overseasLikely);
   }
 
-  // Evidence: unusual_time (unusual day-of-week for this account)
-  const dayOfWeek = new Date(date + "T00:00:00Z").getUTCDay(); // 0-6
+  const dayOfWeek = new Date(date + "T00:00:00Z").getUTCDay();
   const { data: recentForAccount } = await supabase
     .from("transactions")
     .select("date")
@@ -231,8 +220,6 @@ async function detectAnomaliesAi(
   );
   const dowCount = recentDows.filter((d) => d === dayOfWeek).length;
   const dowTotal = recentDows.length;
-  // "Unusual day-of-week" alone is too sensitive; require unusual spend
-  // size OR overseas context.
   const unusualTimeLikely =
     dowTotal > 0 ? dowCount / dowTotal < 0.08 : false;
   const unusualTimeStrongLikely =
@@ -314,10 +301,6 @@ Return an empty array [] if nothing looks anomalous.`;
     if (!allowedSeverities.includes(severity as AnomalyResult["severity"])) continue;
     if (!description) continue;
 
-    // Post-filter to reduce sensitivity:
-    // - "new merchant" (unusual_merchant) must be backed by unusual amount
-    //   and/or overseas context (we incorporate that into unusualMerchantLikely).
-    // - "unusual day-of-week" (unusual_time) must also be backed by the same strong evidence.
     if (type === "unusual_merchant" && !unusualMerchantLikely) continue;
     if (type === "unusual_time" && !unusualTimeStrongLikely) continue;
 
@@ -333,15 +316,13 @@ Return an empty array [] if nothing looks anomalous.`;
 }
 
 export async function detectAnomalies(
+  supabase: SupabaseClient,
   transactionId: string,
   merchant: string | null,
   amountCents: number,
   date: string,
   isRecurring: boolean,
 ): Promise<AnomalyResult[]> {
-  const supabase = createServiceClient();
-
-  // Keep current deterministic logic as a fallback.
   const fallback = await detectAnomaliesHeuristic(
     supabase,
     transactionId,
@@ -352,7 +333,6 @@ export async function detectAnomalies(
   );
 
   try {
-    // If Anthropic isn't configured, we can't do AI anomalies.
     if (!process.env.ANTHROPIC_API_KEY) return fallback;
 
     const aiAnomalies = await detectAnomaliesAi(
@@ -364,8 +344,6 @@ export async function detectAnomalies(
       isRecurring,
     );
 
-    // If AI returns nothing, use fallback so anomalies still show up.
-    // (This prevents “nothing flagged” when AI is unavailable/failed.)
     return aiAnomalies.length > 0 ? aiAnomalies : fallback;
   } catch (error) {
     console.warn("AI anomaly detection failed; using heuristics", {

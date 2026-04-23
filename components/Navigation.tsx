@@ -13,9 +13,13 @@ import {
   Menu,
   X,
   Repeat,
+  LogOut,
+  Settings,
 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 
 const links = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -24,11 +28,19 @@ const links = [
   { href: "/projections", label: "Projections", icon: TrendingUp },
   { href: "/insights", label: "Insights", icon: Brain },
   { href: "/anomalies", label: "Anomalies", icon: AlertTriangle },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Navigation() {
   const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+
+  async function handleLogout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+  }
 
   if (pathname === "/login") return null;
 
@@ -59,6 +71,15 @@ export function Navigation() {
             </Link>
           ))}
         </nav>
+        <div className="border-t p-3">
+          <button
+            onClick={handleLogout}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <LogOut className="h-4 w-4" />
+            Sign out
+          </button>
+        </div>
       </aside>
 
       {/* Mobile header */}
@@ -94,6 +115,13 @@ export function Navigation() {
                 {link.label}
               </Link>
             ))}
+            <button
+              onClick={handleLogout}
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <LogOut className="h-4 w-4" />
+              Sign out
+            </button>
           </nav>
         </div>
       )}

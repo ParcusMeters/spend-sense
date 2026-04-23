@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase/server";
+import { createUserClient } from "@/lib/supabase/server";
 
 export async function POST(request: NextRequest) {
   const { account_id, merchant, description, is_recurring } = await request.json();
@@ -15,7 +15,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const supabase = createServiceClient();
+  const supabase = await createUserClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let query = supabase
     .from("transactions")
@@ -24,6 +26,7 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString(),
     })
     .eq("account_id", account_id)
+    .eq("user_id", user.id)
     .eq("direction", "debit");
 
   query = merchant
@@ -38,4 +41,3 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ status: "ok" });
 }
-

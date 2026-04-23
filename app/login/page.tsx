@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Wallet } from "lucide-react";
 
 export default function LoginPage() {
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -22,7 +23,7 @@ export default function LoginPage() {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ email, password }),
       });
 
       if (!res.ok) {
@@ -47,7 +48,7 @@ export default function LoginPage() {
           </div>
           <CardTitle className="text-xl">SpendSense</CardTitle>
           <p className="text-sm text-muted-foreground">
-            Enter the access password to sign in
+            Enter your email and invite code to sign in
           </p>
         </CardHeader>
         <CardContent>
@@ -55,13 +56,25 @@ export default function LoginPage() {
             <div className="space-y-2 text-center">
               <p className="text-sm font-medium">Check your email</p>
               <p className="text-sm text-muted-foreground">
-                A magic link has been sent to the configured email address.
+                A magic link has been sent to <strong>{email}</strong>.
               </p>
             </div>
           ) : (
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">Invite Code</Label>
                 <Input
                   id="password"
                   type="password"

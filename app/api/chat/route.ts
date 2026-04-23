@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { createServiceClient } from "@/lib/supabase/server";
+import { createUserClient } from "@/lib/supabase/server";
 import { syncRedbarkBalancesToDatabase } from "@/lib/redbark/sync-balances";
 import { format, subMonths } from "date-fns";
 
@@ -17,41 +17,64 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Fetch financial context for Claude
-    const supabase = createServiceClient();
+    const supabase = await createUserClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     await syncRedbarkBalancesToDatabase(supabase);
     const now = new Date();
     const threeMonthsAgo = format(subMonths(now, 3), "yyyy-MM-dd");
     const today = format(now, "yyyy-MM-dd");
 
     const [
+      { data: profile },
       { data: recentTransactions },
       { data: monthlySummaries },
       { data: accounts },
       { data: recurringTxns },
     ] = await Promise.all([
       supabase
+        .from("user_profiles")
+        .select("display_name, monthly_income_cents, savings_goal_cents")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      supabase
         .from("transactions")
         .select("date,description,amount_cents,direction,ai_category,merchant,is_recurring,is_anomaly")
+        .eq("user_id", user.id)
         .gte("date", threeMonthsAgo)
         .order("date", { ascending: false })
         .limit(500),
       supabase
         .from("monthly_summaries")
         .select("*")
+        .eq("user_id", user.id)
         .order("month", { ascending: false })
         .limit(6),
-      supabase.from("accounts").select("redbark_name,institution,type,balance,currency"),
+      supabase.from("accounts").select("redbark_name,institution,type,balance,currency").eq("user_id", user.id),
       supabase
         .from("transactions")
         .select("description,amount_cents,direction,ai_category,merchant")
+        .eq("user_id", user.id)
         .eq("is_recurring", true)
         .gte("date", threeMonthsAgo)
         .order("date", { ascending: false })
         .limit(50),
     ]);
 
-    // Build concise financial context
+    const displayName = profile?.display_name ?? user.email?.split("@")[0] ?? "the user";
+    const monthlyIncome = profile?.monthly_income_cents
+      ? `$${(profile.monthly_income_cents / 100).toFixed(0)}/month net`
+      : "unknown income";
+    const savingsGoal = profile?.savings_goal_cents
+      ? `$${(profile.savings_goal_cents / 100).toFixed(0)} savings goal`
+      : "no savings goal set";
+
     const txns = recentTransactions ?? [];
     const grossSpending = txns
       .filter((t) => t.direction === "debit")
@@ -76,7 +99,6 @@ export async function POST(request: NextRequest) {
       .map(([cat, cents]) => `${cat}: $${(cents / 100).toFixed(2)}`)
       .join(", ");
 
-    // Deduplicate recurring transactions by merchant/description
     const recurringSet = new Map<string, { description: string; amount: number; category: string }>();
     for (const t of recurringTxns ?? []) {
       const key = (t.merchant ?? t.description).toLowerCase();
@@ -106,7 +128,6 @@ export async function POST(request: NextRequest) {
       )
       .join("; ");
 
-    // Build a sample of recent transactions for specific queries
     const recentSample = txns
       .slice(0, 100)
       .map(
@@ -115,9 +136,9 @@ export async function POST(request: NextRequest) {
       )
       .join("\n");
 
-    const systemPrompt = `You are SpendSense, a personal finance assistant for Marcus based in Perth, Australia. You have access to his real bank transaction data. Answer questions conversationally, be specific with numbers, and give actionable advice when relevant.
+    const systemPrompt = `You are SpendSense, a personal finance assistant for ${displayName} based in Australia. You have access to their real bank transaction data. Answer questions conversationally, be specific with numbers, and give actionable advice when relevant.
 
-Marcus earns approximately $5,841/month net and has a $20,000 savings goal.
+The user earns approximately ${monthlyIncome} and has a ${savingsGoal}.
 
 FINANCIAL CONTEXT (last 3 months, as of ${today}):
 
@@ -154,7 +175,6 @@ RULES:
       })),
     });
 
-    // Stream the response back
     const encoder = new TextEncoder();
     const readable = new ReadableStream({
       async start(controller) {

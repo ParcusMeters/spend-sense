@@ -1,6 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createServiceClient } from "@/lib/supabase/server";
 import { syncRedbarkBalancesToDatabase } from "@/lib/redbark/sync-balances";
 
 const anthropic = new Anthropic();
@@ -44,22 +43,21 @@ async function getBalancePromptBlock(supabase: SupabaseClient): Promise<{
 export async function generateDigest(
   type: "weekly" | "monthly" | "ad_hoc",
   startDate: string,
-  endDate: string
+  endDate: string,
+  supabase: SupabaseClient,
+  userId: string,
+  userContext?: { displayName?: string; monthlyIncomeCents?: number; savingsGoalCents?: number },
 ): Promise<{ content: string; summary: string; data: Record<string, unknown> }> {
   const startedAt = Date.now();
-  console.log("AI digest start", {
-    type,
-    startDate,
-    endDate,
-    hasApiKey: Boolean(process.env.ANTHROPIC_API_KEY),
-  });
-  const supabase = createServiceClient();
+  console.log("AI digest start", { type, startDate, endDate });
+
   await syncRedbarkBalancesToDatabase(supabase);
   const balanceBlock = await getBalancePromptBlock(supabase);
 
   const { data: transactions } = await supabase
     .from("transactions")
     .select("*")
+    .eq("user_id", userId)
     .gte("date", startDate)
     .lte("date", endDate)
     .order("date", { ascending: false });
@@ -100,14 +98,13 @@ export async function generateDigest(
 
   const anomalyCount = transactions.filter((t) => t.is_anomaly).length;
 
-  // For weekly digests, include the previous saved weekly insight as reference
-  // (so Claude can comment on changes vs last week).
   let previousWeeklyInsight: { summary: string; content: string } | null = null;
   if (type === "weekly") {
     const { data: prev } = await supabase
       .from("insights")
       .select("summary,content,period_end")
       .eq("type", "weekly")
+      .eq("user_id", userId)
       .lt("period_end", startDate)
       .order("period_end", { ascending: false })
       .limit(1);
@@ -121,7 +118,15 @@ export async function generateDigest(
     }
   }
 
-  const prompt = `You are a personal finance analyst for Marcus, based in Perth, Australia. Generate a ${type} financial digest.
+  const displayName = userContext?.displayName ?? "the user";
+  const monthlyIncome = userContext?.monthlyIncomeCents
+    ? `$${(userContext.monthlyIncomeCents / 100).toFixed(0)}/month net`
+    : "unknown income";
+  const savingsGoal = userContext?.savingsGoalCents
+    ? `$${(userContext.savingsGoalCents / 100).toFixed(0)} savings goal`
+    : "no savings goal set";
+
+  const prompt = `You are a personal finance analyst for ${displayName}, based in Australia. Generate a ${type} financial digest.
 
 Period: ${startDate} to ${endDate}
 Total transactions: ${transactions.length}
@@ -147,7 +152,7 @@ ${type === "weekly" ? "Provide a concise weekly summary with spending patterns, 
 ${type === "monthly" ? "Provide a comprehensive monthly report with trend analysis, category breakdown, savings rate commentary, and 3-5 actionable recommendations. Where it adds value, relate the month to current total balance and per-account picture." : ""}
 ${type === "ad_hoc" ? "Provide an analytical summary of this period with key insights and patterns. Reference current balances if relevant." : ""}
 
-Write in a friendly but professional tone. Use markdown formatting. Be specific with numbers. Marcus earns ~$5,841/month net and aims for a $20,000 savings goal.`;
+Write in a friendly but professional tone. Use markdown formatting. Be specific with numbers. The user earns ~${monthlyIncome} and has a ${savingsGoal}.`;
 
   let message;
   try {
@@ -171,10 +176,8 @@ Write in a friendly but professional tone. Use markdown formatting. Be specific 
       message: e?.message,
       status: e?.status ?? e?.response?.status,
       code: e?.code ?? e?.response?.data?.code,
-      responseData: e?.response?.data ?? null,
     });
-    // If Anthropic billing/credits are unavailable, fall back to a deterministic digest
-    // so the endpoint doesn't 500.
+
     const incomeDollars = (totalIncome / 100).toFixed(2);
     const spendingDollars = (totalSpending / 100).toFixed(2);
     const netSavedDollars = ((totalIncome - totalSpending) / 100).toFixed(2);

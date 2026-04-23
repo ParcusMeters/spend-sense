@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 
-import { createServiceClient } from "@/lib/supabase/server";
+import { createUserClient } from "@/lib/supabase/server";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +29,7 @@ function getEffectiveCategory(t: {
 }
 
 async function AnomaliesContent() {
-  const supabase = createServiceClient();
+  const supabase = await createUserClient();
 
   const { data: anomalyRows, error: anomaliesError } = await supabase
     .from("anomalies")

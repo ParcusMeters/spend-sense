@@ -1,33 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { createUserClient } from "@/lib/supabase/server";
 import { processPendingCategorisation } from "@/lib/categorise/process-pending";
 
 const DEFAULT_MAX_ROUNDS = 20;
 const HARD_MAX_ROUNDS = 100;
 
-async function isAuthenticated(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) return false;
-
-  const token = authHeader.slice("Bearer ".length).trim();
-  if (!token) return false;
-
-  const supabase = createSupabaseClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { auth: { persistSession: false } }
-  );
-
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error) return false;
-  return Boolean(data.user);
-}
-
 export async function POST(request: NextRequest) {
-  const authed = await isAuthenticated(request);
-  if (!authed) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const supabase = await createUserClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json().catch(() => ({} as { maxRounds?: number }));
   const requestedRounds = Number(body?.maxRounds);
@@ -41,7 +22,7 @@ export async function POST(request: NextRequest) {
 
   while (rounds < maxRounds) {
     rounds += 1;
-    const result = await processPendingCategorisation();
+    const result = await processPendingCategorisation(supabase, user.id);
     totalProcessed += result.processed;
     totalFailed += result.failed;
 

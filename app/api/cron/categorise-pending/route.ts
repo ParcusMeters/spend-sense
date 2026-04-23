@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createServiceClient } from "@/lib/supabase/server";
 import { processPendingCategorisation } from "@/lib/categorise/process-pending";
 
 export async function GET(request: NextRequest) {
@@ -7,8 +8,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const supabase = createServiceClient();
+
   try {
-    const result = await processPendingCategorisation();
+    const result = await processPendingCategorisation(supabase);
     return NextResponse.json({ status: "ok", ...result });
   } catch (error) {
     console.error("categorise-pending: failed", error);

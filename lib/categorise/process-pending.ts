@@ -1,4 +1,4 @@
-import { createServiceClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { detectAnomalies } from "@/lib/ai/anomaly";
 import { categoriseTransactions } from "@/lib/ai/categorise";
 
@@ -12,11 +12,13 @@ export type CategorisePendingRunResult = {
   message?: string;
 };
 
-export async function processPendingCategorisation(): Promise<CategorisePendingRunResult> {
-  const supabase = createServiceClient();
+export async function processPendingCategorisation(
+  supabase: SupabaseClient,
+  userId?: string,
+): Promise<CategorisePendingRunResult> {
   const startedAt = Date.now();
 
-  const { data: pending, error: fetchError } = await supabase
+  let query = supabase
     .from("transactions")
     .select(
       "id, redbark_id, description, amount_cents, direction, merchant, redbark_category, date"
@@ -25,6 +27,12 @@ export async function processPendingCategorisation(): Promise<CategorisePendingR
     .order("date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(BATCH_SIZE * MAX_BATCHES_PER_RUN);
+
+  if (userId) {
+    query = query.eq("user_id", userId);
+  }
+
+  const { data: pending, error: fetchError } = await query;
 
   if (fetchError) {
     throw new Error(fetchError.message);
@@ -84,6 +92,7 @@ export async function processPendingCategorisation(): Promise<CategorisePendingR
 
         try {
           const anomalies = await detectAnomalies(
+            supabase,
             txn.id,
             result.merchant_clean,
             txn.amount_cents,
@@ -97,7 +106,9 @@ export async function processPendingCategorisation(): Promise<CategorisePendingR
               .update({ is_anomaly: true, anomaly_reason: anomalies[0].description })
               .eq("id", txn.id);
 
-            await supabase.from("anomalies").insert(anomalies);
+            await supabase.from("anomalies").insert(
+              anomalies.map((a) => ({ ...a, user_id: userId ?? null }))
+            );
           }
         } catch (anomalyErr) {
           console.error("categorise-pending: anomaly detection failed", {
