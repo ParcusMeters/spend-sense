@@ -47,17 +47,21 @@ async function DashboardContent() {
     .lte("date", monthEnd);
 
   const txns = monthTxns ?? [];
+  const effectiveCategory = (t: {
+    user_category_override: string | null;
+    ai_category: string | null;
+    redbark_category: string | null;
+  }) => t.user_category_override ?? t.ai_category ?? t.redbark_category ?? "Other";
+
   const incomeThisMonth = txns
-    .filter((t) => t.direction === "credit" && t.ai_category === "Salary")
+    .filter((t) => t.direction === "credit" && effectiveCategory(t) === "Salary")
     .reduce((sum, t) => sum + t.amount_cents, 0);
 
   const grossSpendingThisMonth = txns
     .filter(
       (t) =>
         t.direction === "debit" &&
-        !isTransferCategory(
-          t.ai_category ?? t.user_category_override ?? t.redbark_category
-        )
+        !isTransferCategory(effectiveCategory(t))
     )
     .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
 
@@ -65,7 +69,7 @@ async function DashboardContent() {
     .filter(
       (t) =>
         t.direction === "credit" &&
-        isReimbursementCategory(t.ai_category ?? t.user_category_override)
+        isReimbursementCategory(effectiveCategory(t))
     )
     .reduce((sum, t) => sum + t.amount_cents, 0);
 
@@ -76,9 +80,7 @@ async function DashboardContent() {
       (t) =>
         t.direction === "debit" &&
         t.is_recurring === true &&
-        !isTransferCategory(
-          t.ai_category ?? t.user_category_override ?? t.redbark_category
-        )
+        !isTransferCategory(effectiveCategory(t))
     )
     .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
 
@@ -94,7 +96,7 @@ async function DashboardContent() {
     .filter(
       (t) =>
         t.direction === "debit" &&
-        !isTransferCategory(t.ai_category ?? t.user_category_override ?? t.redbark_category)
+        !isTransferCategory(effectiveCategory(t))
     )
     .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
 
@@ -102,7 +104,7 @@ async function DashboardContent() {
     .filter(
       (t) =>
         t.direction === "credit" &&
-        isReimbursementCategory(t.ai_category ?? t.user_category_override)
+        isReimbursementCategory(effectiveCategory(t))
     )
     .reduce((sum, t) => sum + t.amount_cents, 0);
 
@@ -190,8 +192,7 @@ async function DashboardContent() {
   const categoryMap: Record<string, number> = {};
   for (const t of allTxns ?? []) {
     if (t.direction !== "debit") continue;
-    // Prefer AI categories for the dashboard chart.
-    const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category ?? "Other";
+    const cat = effectiveCategory(t);
     if (isTransferCategory(cat)) continue;
     categoryMap[cat] = (categoryMap[cat] ?? 0) + Math.abs(t.amount_cents);
   }
@@ -216,7 +217,7 @@ async function DashboardContent() {
   for (const t of trendTxns ?? []) {
     const monthKey = transactionMonthKey(t.date);
     if (!monthKey || !monthKeySet.has(monthKey)) continue;
-    const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category ?? "Other";
+    const cat = effectiveCategory(t);
     if (isTransferCategory(cat)) continue;
 
     if (t.direction === "credit" && cat === "Salary") {
@@ -271,7 +272,7 @@ async function DashboardContent() {
     const m = transactionMonthKey(t.date);
     if (!m) continue;
     if (!monthlyData[m]) monthlyData[m] = { income: 0, spending: 0 };
-    const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category;
+    const cat = effectiveCategory(t);
     if (isTransferCategory(cat)) continue;
     if (t.direction === "credit" && cat === "Salary") {
       monthlyData[m].income += t.amount_cents;

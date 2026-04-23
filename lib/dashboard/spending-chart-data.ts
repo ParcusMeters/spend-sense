@@ -60,7 +60,7 @@ export type TrendTxnLite = {
 export type DailyChartCategory = { key: string; name: string; color: string };
 
 function effectiveCategory(t: TrendTxnLite): string {
-  return t.ai_category ?? t.user_category_override ?? t.redbark_category ?? "Other";
+  return t.user_category_override ?? t.ai_category ?? t.redbark_category ?? "Other";
 }
 
 export function buildDailySpendingChartData(

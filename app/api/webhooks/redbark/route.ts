@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { verifyWebhook } from "@/lib/redbark/webhook";
 import type { RedbarkTransaction } from "@/lib/redbark/types";
 import { createServiceClient } from "@/lib/supabase/server";
+import { processPendingCategorisation } from "@/lib/categorise/process-pending";
 
 type TransactionsSyncedPayload = {
   id?: string;
@@ -236,6 +237,7 @@ async function processTransactionsSyncedPayload(
         redbark_category: txn.category,
         post_date: txn.post_date,
         raw_data: txn,
+        ai_status: "pending",
         updated_at: new Date().toISOString(),
       })
       .eq("redbark_id", txn.id);
@@ -252,6 +254,22 @@ async function processTransactionsSyncedPayload(
   }
 
   const elapsedMs = Date.now() - startedAt;
+  const shouldAutoCategorise = insertedCount > 0 || dataUpdated.length > 0;
+  let categoriseResult:
+    | { processed: number; failed: number; elapsed_ms: number; message?: string }
+    | null = null;
+
+  if (shouldAutoCategorise) {
+    try {
+      categoriseResult = await processPendingCategorisation();
+    } catch (error) {
+      console.error("redbark:webhook auto-categorise failed", {
+        deliveryId,
+        error: String(error),
+      });
+    }
+  }
+
   console.log("redbark:webhook transactions.synced complete", {
     deliveryId,
     syncRunId: meta.sync_run_id,
@@ -261,7 +279,9 @@ async function processTransactionsSyncedPayload(
     updatedAttempted: dataUpdated.length,
     updateErrors,
     elapsedMs,
-    note: "New rows use ai_status=pending until categorise-pending cron runs.",
+    autoCategoriseTriggered: shouldAutoCategorise,
+    autoCategoriseResult: categoriseResult,
+    note: "New and updated rows are marked ai_status=pending and auto-categorised after ingest.",
   });
 }
 
