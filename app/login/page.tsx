@@ -1,18 +1,67 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Loader2, Wallet } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
+  const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [processingLink, setProcessingLink] = useState(true);
+
+  useEffect(() => {
+    async function handleMagicLink() {
+      const url = new URL(window.location.href);
+      const code = url.searchParams.get("code");
+      const hashParams = new URLSearchParams(window.location.hash.slice(1));
+      const accessToken = hashParams.get("access_token");
+      const refreshToken = hashParams.get("refresh_token");
+
+      try {
+        if (code) {
+          await supabase.auth.exchangeCodeForSession(code);
+          url.searchParams.delete("code");
+          window.history.replaceState({}, "", url.toString());
+          router.replace("/");
+          return;
+        }
+
+        if (accessToken && refreshToken) {
+          await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          window.history.replaceState({}, "", `${url.origin}${url.pathname}${url.search}`);
+          router.replace("/");
+          return;
+        }
+
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (user) {
+          router.replace("/");
+          return;
+        }
+      } catch (err) {
+        console.error("[LoginPage] magic link handling failed", err);
+      } finally {
+        setProcessingLink(false);
+      }
+    }
+
+    void handleMagicLink();
+  }, [router, supabase]);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -52,7 +101,12 @@ export default function LoginPage() {
           </p>
         </CardHeader>
         <CardContent>
-          {sent ? (
+          {processingLink ? (
+            <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Signing you in...
+            </div>
+          ) : sent ? (
             <div className="space-y-2 text-center">
               <p className="text-sm font-medium">Check your email</p>
               <p className="text-sm text-muted-foreground">
