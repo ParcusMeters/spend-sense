@@ -62,6 +62,17 @@ export function TransactionList() {
 
   const fetchTransactions = useCallback(async () => {
     setLoading(true);
+
+    // getSession() reads the cached session — no network round-trip.
+    const { data: sessionData } = await supabase.auth.getSession();
+    console.log("[TransactionList] fetch start", {
+      userId: sessionData.session?.user?.id ?? null,
+      hasSession: !!sessionData.session,
+      filters: { search, category, direction, dateFrom, dateTo },
+      page,
+      range: [page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1],
+    });
+
     let query = supabase
       .from("transactions")
       .select("*, accounts(redbark_name)")
@@ -93,7 +104,24 @@ export function TransactionList() {
       query = query.eq("direction", direction);
     }
 
-    const { data, error } = await query;
+    const { data, error, status } = await query;
+
+    if (error) {
+      console.error("[TransactionList] query failed", {
+        status,
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+    } else {
+      console.log("[TransactionList] query ok", {
+        status,
+        rows: data?.length ?? 0,
+        firstDate: data?.[0]?.date ?? null,
+        lastDate: data?.[data.length - 1]?.date ?? null,
+      });
+    }
 
     if (!error && data) {
       setTransactions(data as TransactionWithAccount[]);
