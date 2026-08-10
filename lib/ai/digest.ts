@@ -157,8 +157,9 @@ Write in a friendly but professional tone. Use markdown formatting. Be specific 
   let message;
   try {
     message = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2048,
+      model: "claude-sonnet-5",
+      max_tokens: 4096,
+      thinking: { type: "disabled" },
       messages: [{ role: "user", content: prompt }],
     });
   } catch (error) {

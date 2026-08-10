@@ -166,8 +166,9 @@ RULES:
 - Keep responses focused — this is a chat, not an essay.`;
 
     const stream = await anthropic.messages.stream({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
+      model: "claude-sonnet-5",
+      max_tokens: 2048,
+      thinking: { type: "disabled" },
       system: systemPrompt,
       messages: messages.map((m: { role: string; content: string }) => ({
         role: m.role as "user" | "assistant",
