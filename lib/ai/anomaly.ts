@@ -273,9 +273,9 @@ Return ONLY a JSON array. Each element:
 Return an empty array [] if nothing looks anomalous.`;
 
   const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 800,
-    temperature: 0,
+    model: "claude-sonnet-5",
+    max_tokens: 2000,
+    thinking: { type: "disabled" },
     messages: [{ role: "user", content: prompt }],
   });
 

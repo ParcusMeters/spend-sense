@@ -94,9 +94,9 @@ ${txnList}`;
   let message;
   try {
     message = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4096,
-      temperature: 0,
+      model: "claude-sonnet-5",
+      max_tokens: 8192,
+      thinking: { type: "disabled" },
       messages: [
         {
           role: "user",
