@@ -103,8 +103,12 @@ export function MonthlyTrend({
     return mk === selectedMonthKey ? 1 : 0.35;
   }
 
-  function handleMonthBarClick(_: unknown, index: number) {
-    const mk = data[index]?.monthKey;
+  // Recharts' Rectangle renders nothing for a zero-height bar, so the `index`
+  // it reports counts *rendered* rectangles, not data rows. Any month with a
+  // zero value (e.g. no income) shifts every later index by one — clicking
+  // August would select July. Read the row off the event payload instead.
+  function handleMonthBarClick(bar: unknown) {
+    const mk = (bar as { payload?: { monthKey?: unknown } } | undefined)?.payload?.monthKey;
     if (typeof mk === "string" && onMonthClick) onMonthClick(mk);
   }
 
