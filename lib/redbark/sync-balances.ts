@@ -207,11 +207,22 @@ export async function syncRedbarkBalancesToDatabase(
           last_synced_at: now,
           updated_at: now,
         };
-        if (userId) upsertRow.user_id = userId;
+        // accounts.user_id is NOT NULL as of 007, and the unique indexes are
+        // composite on user_id — an upsert without it can neither match nor
+        // insert. The old `onConflict: "redbark_name"` fallback also named a
+        // constraint that 005 dropped.
+        if (!userId) {
+          console.error("syncRedbarkBalancesToDatabase: no userId; skipping account insert", {
+            redbarkAccountId: acc.id,
+            redbarkName: acc.name,
+          });
+          continue;
+        }
+        upsertRow.user_id = userId;
 
         const { error } = await supabase.from("accounts").upsert(
           upsertRow,
-          { onConflict: userId ? "redbark_name,user_id" : "redbark_name" }
+          { onConflict: "redbark_account_id,user_id" }
         );
 
         if (error) {

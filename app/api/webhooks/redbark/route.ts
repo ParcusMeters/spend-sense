@@ -115,8 +115,18 @@ async function processTransactionsSyncedPayload(
 
   const supabase = createServiceClient();
 
+  // Writing rows with a null user_id is what produced 291 duplicate accounts
+  // and 1300 RLS-invisible transactions: the (redbark_name, user_id) unique
+  // index can't match on NULL, so every delivery inserted instead of updating.
+  // Reject the delivery instead — Redbark will retry once a profile exists.
   if (!webhookUserId) {
-    console.warn("redbark:webhook no user profile found for webhook secret", { deliveryId });
+    console.error("redbark:webhook no user profile matched; refusing to write null-owner rows", {
+      deliveryId,
+    });
+    return NextResponse.json(
+      { error: "No user profile matched this webhook secret" },
+      { status: 503 },
+    );
   }
 
   const accountMap = new Map<string, string>();
