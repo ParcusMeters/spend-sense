@@ -4,6 +4,13 @@ import { categoriseTransactions } from "@/lib/ai/categorise";
 
 const BATCH_SIZE = 10;
 const MAX_BATCHES_PER_RUN = 5;
+/**
+ * A run that dies mid-flight (function timeout, redeploy) leaves rows marked
+ * 'processing'. Nothing else selects that state, so without this they would never
+ * be categorised again — and the live status indicator would show them in flight
+ * forever. Anything older than this is treated as abandoned and requeued.
+ */
+const STALE_PROCESSING_MS = 15 * 60 * 1000;
 
 export type CategorisePendingRunResult = {
   processed: number;
@@ -15,6 +22,22 @@ export type CategorisePendingRunResult = {
 export async function processPendingCategorisation(): Promise<CategorisePendingRunResult> {
   const supabase = createServiceClient();
   const startedAt = Date.now();
+
+  const staleBefore = new Date(startedAt - STALE_PROCESSING_MS).toISOString();
+  const { data: recovered, error: recoverError } = await supabase
+    .from("transactions")
+    .update({ ai_status: "pending", updated_at: new Date().toISOString() })
+    .eq("ai_status", "processing")
+    .lt("updated_at", staleBefore)
+    .select("id");
+
+  if (recoverError) {
+    console.error("categorise-pending: failed to requeue stale processing rows", recoverError);
+  } else if (recovered && recovered.length > 0) {
+    console.warn("categorise-pending: requeued stale processing rows", {
+      count: recovered.length,
+    });
+  }
 
   const { data: pending, error: fetchError } = await supabase
     .from("transactions")
@@ -40,7 +63,12 @@ export async function processPendingCategorisation(): Promise<CategorisePendingR
   }
 
   const pendingIds = pending.map((t) => t.id);
-  await supabase.from("transactions").update({ ai_status: "processing" }).in("id", pendingIds);
+  // updated_at is stamped explicitly (no DB trigger maintains it) so the stale
+  // sweep above can tell a live run from an abandoned one.
+  await supabase
+    .from("transactions")
+    .update({ ai_status: "processing", updated_at: new Date().toISOString() })
+    .in("id", pendingIds);
 
   let totalProcessed = 0;
   let totalFailed = 0;

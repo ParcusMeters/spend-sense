@@ -33,6 +33,7 @@ import { SpendingGoalTracker } from "@/components/dashboard/SpendingGoalTracker"
 import { getCurrentWeek } from "@/lib/utils/dates";
 import { buildWeeklySummary, type WeekTxnLite } from "@/lib/dashboard/weekly-summary";
 import { RunCategoriseButton } from "@/components/dashboard/RunCategoriseButton";
+import { CategorisationStatus } from "@/components/dashboard/CategorisationStatus";
 
 async function DashboardContent() {
   const supabase = createServiceClient();
@@ -353,6 +354,8 @@ async function DashboardContent() {
           <RunCategoriseButton />
         </div>
       </div>
+
+      <CategorisationStatus />
 
       <BalanceCards
         totalBalance={totalBalance}
