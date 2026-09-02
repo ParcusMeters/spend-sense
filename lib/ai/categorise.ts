@@ -8,6 +8,8 @@ const CATEGORIES = [
   "Eating out",
   "Drinks & nightlife",
   "Transport",
+  "Rent",
+  "Bills & utilities",
   "Subscriptions",
   "Entertainment",
   "Health",
@@ -75,6 +77,12 @@ Salary vs Transfers (important):
 - "Salary" is ONLY for income paid by an employer or external party (wages, salary, freelance payments, government benefits). The description usually contains a company/business name and keywords like "payroll", "salary", "wages", or a recognisable employer name.
 - "Transfers" is for money moving between the user's OWN accounts (e.g. savings ↔ everyday, Revolut top-ups, moving money between banks). Look for generic descriptions like "Transfer", "Direct Credit", account numbers, or the user's own name.
 - When a credit transaction is ambiguous and could be either, prefer "Transfers" over "Salary". Only use "Salary" when you are reasonably confident it is external income.
+
+Rent and bills (important):
+- "Rent" is rent paid out to a landlord, real estate agent or housemate, including when it is sent as a bank transfer or PayID payment to that person. Where the payee is external, "Rent" beats "Transfers" even though the transaction is a transfer.
+- BUT a move between the user's own accounts stays "Transfers" even when the memo says rent. Descriptions like "Transfer to xx4324 CommBank app, Rent" are the user setting money aside for rent, not paying it — these are account numbers, not payees.
+- "Bills & utilities" is electricity, gas, water, internet, mobile phone and council rates. Phone and internet plans belong here, not in "Subscriptions" — keep "Subscriptions" for software, streaming and memberships.
+- The bank category RENT_AND_UTILITIES is a strong hint for one of these two; read the description to decide which.
 
 Reimbursements:
 - "Reimbursements" is for credit transactions where someone (a friend, colleague, or individual) is paying the user back for a shared expense. Look for PayID payments from individual names, bank transfers with personal names, or small-to-medium credits that look like splitting bills, rent, travel, or group bookings.

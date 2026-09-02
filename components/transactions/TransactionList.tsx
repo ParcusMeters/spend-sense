@@ -18,6 +18,8 @@ const CATEGORIES = [
   "Eating out",
   "Drinks & nightlife",
   "Transport",
+  "Rent",
+  "Bills & utilities",
   "Subscriptions",
   "Entertainment",
   "Health",
@@ -25,6 +27,7 @@ const CATEGORIES = [
   "Travel",
   "Bank fees",
   "Transfers",
+  "Reimbursements",
   "Investing",
   "Other",
 ];

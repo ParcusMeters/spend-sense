@@ -20,6 +20,8 @@ export const CATEGORY_COLORS: Record<string, string> = {
   "Eating out": "#ED93B1",
   "Drinks & nightlife": "#D4537E",
   Transport: "#F0997B",
+  Rent: "#E0655A",
+  "Bills & utilities": "#9BBF5C",
   Subscriptions: "#378ADD",
   Entertainment: "#FAC775",
   Health: "#AFA9EC",
