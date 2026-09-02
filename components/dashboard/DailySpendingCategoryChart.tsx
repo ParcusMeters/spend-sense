@@ -23,7 +23,10 @@ interface DailySpendingCategoryChartProps {
   categories: DailyCategory[];
   /** Daily spending budget in cents — shown as a dashed reference line. */
   budgetCents?: number;
-  onDayClick?: (isoDate: string) => void;
+  /** Receives the bucket's range; for daily bars both dates are the same day. */
+  onRangeClick?: (fromIso: string, toIso: string) => void;
+  /** What one bar represents, used for the click hint. */
+  bucketNoun?: "day" | "week";
 }
 
 interface DailyTooltipEntry {
@@ -74,7 +77,8 @@ export function DailySpendingCategoryChart({
   data,
   categories,
   budgetCents,
-  onDayClick,
+  onRangeClick,
+  bucketNoun = "day",
 }: DailySpendingCategoryChartProps) {
   const hasData = data.length > 0;
   const chartWidth = Math.max(760, data.length * 56);
@@ -102,30 +106,36 @@ export function DailySpendingCategoryChart({
   }, [hasData, data.length, categories.length, title]);
 
   function handleDayBarClick(barEntry: unknown, rectIndex: number) {
-    if (!onDayClick) return;
+    if (!onRangeClick) return;
+    const isIso = (v: unknown): v is string =>
+      typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
     const be = barEntry as {
-      payload?: { date?: unknown };
+      payload?: { date?: unknown; rangeEnd?: unknown };
       originalDataIndex?: number;
     };
-    const fromPayload = be?.payload?.date;
-    if (typeof fromPayload === "string" && /^\d{4}-\d{2}-\d{2}$/.test(fromPayload)) {
-      onDayClick(fromPayload);
+
+    if (isIso(be?.payload?.date)) {
+      const from = be.payload.date;
+      onRangeClick(from, isIso(be.payload.rangeEnd) ? be.payload.rangeEnd : from);
       return;
     }
+
     const idx =
       typeof be?.originalDataIndex === "number" ? be.originalDataIndex : rectIndex;
     const row = data[idx];
-    const d = row?.date;
-    if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) onDayClick(d);
+    if (isIso(row?.date)) {
+      onRangeClick(row.date, isIso(row.rangeEnd) ? row.rangeEnd : row.date);
+    }
   }
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
-        {onDayClick && (
+        {onRangeClick && (
           <p className="text-xs font-normal text-muted-foreground">
-            Click a day to open transactions filtered to that date.
+            Click a {bucketNoun} to open transactions filtered to it.
           </p>
         )}
       </CardHeader>
@@ -190,8 +200,8 @@ export function DailySpendingCategoryChart({
                     name={c.name}
                     stackId="spend"
                     fill={c.color}
-                    cursor={onDayClick ? "pointer" : "default"}
-                    onClick={onDayClick ? handleDayBarClick : undefined}
+                    cursor={onRangeClick ? "pointer" : "default"}
+                    onClick={onRangeClick ? handleDayBarClick : undefined}
                   />
                 ))}
               </BarChart>

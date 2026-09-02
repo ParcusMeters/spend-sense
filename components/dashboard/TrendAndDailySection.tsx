@@ -6,6 +6,7 @@ import { getMonthLabel } from "@/lib/utils/dates";
 import {
   buildCategoryBreakdown,
   buildDailySpendingChartData,
+  type ChartGranularity,
   type TrendTxnLite,
 } from "@/lib/dashboard/spending-chart-data";
 import { MonthlyTrend } from "./MonthlyTrend";
@@ -40,17 +41,22 @@ export function TrendAndDailySection({
   const router = useRouter();
 
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
+  const [granularity, setGranularity] = useState<ChartGranularity>("day");
 
-  const monthDaily = useMemo(() => {
-    if (!selectedMonthKey) return null;
-    return buildDailySpendingChartData(trendTxns, {
-      kind: "month",
-      monthKey: selectedMonthKey,
-    });
-  }, [trendTxns, selectedMonthKey]);
+  // The server already rendered the default view (rolling days), so only rebuild
+  // when the selection or granularity moves away from it.
+  const recomputed = useMemo(() => {
+    if (!selectedMonthKey && granularity === "day") return null;
+    return buildDailySpendingChartData(
+      trendTxns,
+      selectedMonthKey
+        ? { kind: "month", monthKey: selectedMonthKey, granularity }
+        : { kind: "rolling", days: 35, granularity }
+    );
+  }, [trendTxns, selectedMonthKey, granularity]);
 
-  const displayDailyData = monthDaily?.data ?? initialDailyData;
-  const displayDailyCategories = monthDaily?.categories ?? initialDailyCategories;
+  const displayDailyData = recomputed?.data ?? initialDailyData;
+  const displayDailyCategories = recomputed?.categories ?? initialDailyCategories;
 
   // The wheel follows the same month selection as the daily chart, so clicking a
   // month re-cuts the category split instead of leaving a stale 6-month view.
@@ -65,9 +71,10 @@ export function TrendAndDailySection({
   const isMonthSelected = Boolean(selectedMonthKey && /^\d{4}-\d{2}$/.test(selectedMonthKey));
   const monthLabel = isMonthSelected ? getMonthLabel(`${selectedMonthKey}-01`) : null;
 
+  const spendingNoun = granularity === "week" ? "Weekly" : "Daily";
   const dailyTitle = monthLabel
-    ? `Daily Spending — ${monthLabel}`
-    : "Daily Spending by Category";
+    ? `${spendingNoun} Spending — ${monthLabel}`
+    : `${spendingNoun} Spending by Category`;
 
   return (
     <div className="space-y-6">
@@ -103,17 +110,34 @@ export function TrendAndDailySection({
             </Button>
           ) : (
             <span className="text-xs text-muted-foreground">
-              Click a month above to view daily breakdown for that month.
+              Click a month above to view the breakdown for that month.
             </span>
           )}
+
+          <div className="inline-flex rounded-md border p-0.5" role="group">
+            {(["day", "week"] as const).map((option) => (
+              <Button
+                key={option}
+                type="button"
+                size="sm"
+                variant={granularity === option ? "secondary" : "ghost"}
+                className="h-7 px-3 text-xs"
+                aria-pressed={granularity === option}
+                onClick={() => setGranularity(option)}
+              >
+                {option === "day" ? "Daily" : "Weekly"}
+              </Button>
+            ))}
+          </div>
         </div>
         <DailySpendingCategoryChart
           title={dailyTitle}
           data={displayDailyData}
           categories={displayDailyCategories}
           budgetCents={dailyBudgetCents ?? undefined}
-          onDayClick={(isoDate) => {
-            const q = new URLSearchParams({ from: isoDate, to: isoDate });
+          bucketNoun={granularity}
+          onRangeClick={(fromIso, toIso) => {
+            const q = new URLSearchParams({ from: fromIso, to: toIso });
             router.push(`/transactions?${q.toString()}`);
           }}
         />

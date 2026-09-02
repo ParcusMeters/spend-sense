@@ -1,9 +1,11 @@
 import {
   eachDayOfInterval,
   endOfMonth,
+  endOfWeek,
   format,
   parseISO,
   startOfMonth,
+  startOfWeek,
   subDays,
 } from "date-fns";
 import { transactionMonthKey } from "@/lib/utils/dates";
@@ -115,11 +117,54 @@ export function buildCategoryBreakdown(
     .map(([name, value]) => ({ name, value, color: getCategoryColor(name) }));
 }
 
+export type ChartGranularity = "day" | "week";
+
+/**
+ * Buckets the range by day or by Mon-Sun week.
+ *
+ * Weeks are clamped to the range so a partial week at either edge still totals
+ * only what falls inside it — the two granularities always sum to the same
+ * amount for the same range.
+ */
+function buildBuckets(
+  dates: string[],
+  granularity: ChartGranularity
+): { key: string; end: string; label: string; days: string[] }[] {
+  if (granularity === "day") {
+    return dates.map((d) => ({ key: d, end: d, label: calendarDayLabel(d), days: [d] }));
+  }
+
+  const rangeStart = dates[0]!;
+  const rangeEnd = dates[dates.length - 1]!;
+  const byWeek = new Map<string, string[]>();
+
+  for (const d of dates) {
+    const weekStart = format(startOfWeek(parseISO(d), { weekStartsOn: 1 }), "yyyy-MM-dd");
+    const existing = byWeek.get(weekStart);
+    if (existing) existing.push(d);
+    else byWeek.set(weekStart, [d]);
+  }
+
+  return [...byWeek.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([weekStart, days]) => {
+      const weekEnd = format(endOfWeek(parseISO(weekStart), { weekStartsOn: 1 }), "yyyy-MM-dd");
+      const start = weekStart < rangeStart ? rangeStart : weekStart;
+      const end = weekEnd > rangeEnd ? rangeEnd : weekEnd;
+      return {
+        key: start,
+        end,
+        label: `${calendarDayLabel(start)} – ${calendarDayLabel(end)}`,
+        days,
+      };
+    });
+}
+
 export function buildDailySpendingChartData(
   txns: TrendTxnLite[],
   spec:
-    | { kind: "rolling"; days: number; today?: Date }
-    | { kind: "month"; monthKey: string }
+    | { kind: "rolling"; days: number; today?: Date; granularity?: ChartGranularity }
+    | { kind: "month"; monthKey: string; granularity?: ChartGranularity }
 ): {
   data: Record<string, string | number>[];
   categories: DailyChartCategory[];
@@ -168,13 +213,21 @@ export function buildDailySpendingChartData(
       color: getCategoryColor(name),
     }));
 
-  const data = dates.map((d) => {
+  const buckets = buildBuckets(dates, spec.granularity ?? "day");
+
+  const data = buckets.map((bucket) => {
     const row: Record<string, string | number> = {
-      date: d,
-      label: calendarDayLabel(d),
+      date: bucket.key,
+      // Range the bucket covers, so a click can filter to the whole week.
+      rangeEnd: bucket.end,
+      label: bucket.label,
     };
     for (const c of categories) {
-      row[c.key] = dailyMap[d]?.[c.name] ?? 0;
+      let total = 0;
+      for (const day of bucket.days) {
+        total += dailyMap[day]?.[c.name] ?? 0;
+      }
+      row[c.key] = total;
     }
     return row;
   });
