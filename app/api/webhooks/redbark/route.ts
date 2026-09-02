@@ -81,11 +81,20 @@ function txnPreview(t: RedbarkTransaction) {
   };
 }
 
-async function processTransactionsSyncedPayload(
+type PersistResult = {
+  insertedCount: number;
+  insertErrors: number;
+  insertSkipped: number;
+  updatedAttempted: number;
+  updateErrors: number;
+  elapsedMs: number;
+};
+
+async function persistTransactionsSyncedPayload(
   payload: TransactionsSyncedPayload,
   deliveryId: string,
   userAgent: string
-) {
+): Promise<PersistResult> {
   const startedAt = Date.now();
   const dataNew = payload.data?.new ?? [];
   const dataUpdated = payload.data?.updated ?? [];
@@ -139,7 +148,7 @@ async function processTransactionsSyncedPayload(
       error: accountsErr.message,
       code: accountsErr.code,
     });
-    return;
+    throw new Error(`failed to load accounts: ${accountsErr.message}`);
   }
 
   const byRedbarkAccountId = new Map<string, AccountRef>();
@@ -262,6 +271,11 @@ async function processTransactionsSyncedPayload(
   let insertedCount = 0;
   let insertErrors = 0;
   let insertSkipped = 0;
+
+  // Build every row first, then write in batches. This runs inside the request, so
+  // one round trip per batch (rather than per transaction) is what keeps a large
+  // delivery inside the webhook timeout.
+  const rowsToInsert: Record<string, unknown>[] = [];
   for (const txn of dataNew) {
     const label = txn.account_name ?? txn.account;
     const account = accountMap.get(label);
@@ -286,91 +300,90 @@ async function processTransactionsSyncedPayload(
       continue;
     }
 
+    rowsToInsert.push({
+      redbark_id: txn.id,
+      user_id: userId,
+      account_id: account?.id ?? null,
+      date: txn.transaction_date,
+      description: txn.description,
+      amount_cents: txn.amount,
+      currency: txn.currency,
+      direction: txn.direction,
+      status: txn.status,
+      merchant: txn.merchant_name,
+      redbark_class: txn.class,
+      redbark_category: txn.category,
+      post_date: txn.post_date,
+      raw_data: txn,
+      ai_status: "pending",
+    });
+  }
+
+  const INSERT_BATCH = 100;
+  for (let i = 0; i < rowsToInsert.length; i += INSERT_BATCH) {
+    const batch = rowsToInsert.slice(i, i + INSERT_BATCH);
     const { error } = await supabase
       .from("transactions")
-      .upsert(
-        {
-          redbark_id: txn.id,
-          user_id: userId,
-          account_id: account?.id ?? null,
-          date: txn.transaction_date,
-          description: txn.description,
-          amount_cents: txn.amount,
-          currency: txn.currency,
-          direction: txn.direction,
-          status: txn.status,
-          merchant: txn.merchant_name,
-          redbark_class: txn.class,
-          redbark_category: txn.category,
-          post_date: txn.post_date,
-          raw_data: txn,
-          ai_status: "pending",
-        },
-        { onConflict: "redbark_id" }
-      );
+      .upsert(batch, { onConflict: "redbark_id" });
 
     if (error) {
-      insertErrors++;
-      console.error("redbark:webhook transaction upsert failed", {
+      insertErrors += batch.length;
+      console.error("redbark:webhook transaction batch upsert failed", {
         deliveryId,
-        redbarkId: txn.id,
-        date: txn.transaction_date,
-        accountLabel: label,
+        batchStart: i,
+        batchSize: batch.length,
+        firstRedbarkId: batch[0]?.redbark_id,
         error: error.message,
         code: error.code,
         details: error.details,
       });
     } else {
-      insertedCount++;
+      insertedCount += batch.length;
     }
   }
 
+  // Updates stay per-row (each targets a different redbark_id) but run with bounded
+  // concurrency so a large batch cannot blow the request timeout.
   let updateErrors = 0;
-  for (const txn of dataUpdated) {
-    const { error } = await supabase
-      .from("transactions")
-      .update({
-        amount_cents: txn.amount,
-        status: txn.status,
-        description: txn.description,
-        merchant: txn.merchant_name,
-        redbark_category: txn.category,
-        post_date: txn.post_date,
-        raw_data: txn,
-        ai_status: "pending",
-        updated_at: new Date().toISOString(),
+  const UPDATE_CONCURRENCY = 10;
+  for (let i = 0; i < dataUpdated.length; i += UPDATE_CONCURRENCY) {
+    const batch = dataUpdated.slice(i, i + UPDATE_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(async (txn) => {
+        const { error } = await supabase
+          .from("transactions")
+          .update({
+            amount_cents: txn.amount,
+            status: txn.status,
+            description: txn.description,
+            merchant: txn.merchant_name,
+            redbark_category: txn.category,
+            post_date: txn.post_date,
+            raw_data: txn,
+            ai_status: "pending",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("redbark_id", txn.id);
+        return { txn, error };
       })
-      .eq("redbark_id", txn.id);
+    );
 
-    if (error) {
-      updateErrors++;
-      console.error("redbark:webhook transaction update failed", {
-        deliveryId,
-        redbarkId: txn.id,
-        error: error.message,
-        code: error.code,
-      });
+    for (const { txn, error } of results) {
+      if (error) {
+        updateErrors++;
+        console.error("redbark:webhook transaction update failed", {
+          deliveryId,
+          redbarkId: txn.id,
+          error: error.message,
+          code: error.code,
+        });
+      }
     }
   }
 
   const elapsedMs = Date.now() - startedAt;
-  const shouldAutoCategorise = insertedCount > 0 || dataUpdated.length > 0;
-  let categoriseResult:
-    | { processed: number; failed: number; elapsed_ms: number; message?: string }
-    | null = null;
 
-  if (shouldAutoCategorise) {
-    try {
-      categoriseResult = await processPendingCategorisation();
-    } catch (error) {
-      console.error("redbark:webhook auto-categorise failed", {
-        deliveryId,
-        error: String(error),
-      });
-    }
-  }
-
-  console.log("redbark:webhook transactions.synced complete", {
+  console.log("redbark:webhook transactions.synced persisted", {
     deliveryId,
     syncRunId: meta.sync_run_id,
     chunk: meta.chunk != null && meta.total_chunks != null ? `${meta.chunk}/${meta.total_chunks}` : undefined,
@@ -380,10 +393,17 @@ async function processTransactionsSyncedPayload(
     updatedAttempted: dataUpdated.length,
     updateErrors,
     elapsedMs,
-    autoCategoriseTriggered: shouldAutoCategorise,
-    autoCategoriseResult: categoriseResult,
-    note: "New and updated rows are marked ai_status=pending and auto-categorised after ingest.",
+    note: "Rows are saved with ai_status=pending; categorisation runs after the response.",
   });
+
+  return {
+    insertedCount,
+    insertErrors,
+    insertSkipped,
+    updatedAttempted: dataUpdated.length,
+    updateErrors,
+    elapsedMs,
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -432,31 +452,86 @@ export async function POST(request: NextRequest) {
   const dataUpdated = payload.data?.updated ?? [];
   const meta = payload.metadata ?? {};
 
-  after(async () => {
-    try {
-      await processTransactionsSyncedPayload(payload, deliveryId, userAgent);
-    } catch (err) {
-      console.error("redbark:webhook async processing failed", {
-        deliveryId,
-        error: String(err),
-      });
-    }
-  });
+  // Persist before responding. Redbark webhook destinations carry the only copy of
+  // these payloads — there is no replay: `resync` re-reads the window but re-sends
+  // nothing already delivered, and event redelivery carries counts, not rows. So a
+  // 2xx returned before the write turns any downstream failure into permanent data
+  // loss. Answering non-2xx is the only way to tell Redbark the delivery failed.
+  let result: PersistResult;
+  try {
+    result = await persistTransactionsSyncedPayload(payload, deliveryId, userAgent);
+  } catch (err) {
+    console.error("redbark:webhook processing failed", {
+      deliveryId,
+      newCount: dataNew.length,
+      updatedCount: dataUpdated.length,
+      chunk: meta.chunk,
+      totalChunks: meta.total_chunks,
+      error: String(err),
+    });
+    return NextResponse.json(
+      { error: "processing_failed", delivery_id: deliveryId },
+      { status: 500 }
+    );
+  }
 
-  console.log("redbark:webhook accepted (processing async)", {
+  const lostRows = result.insertErrors + result.insertSkipped + result.updateErrors;
+  if (lostRows > 0) {
+    console.error("redbark:webhook rejecting delivery, rows not persisted", {
+      deliveryId,
+      insertErrors: result.insertErrors,
+      insertSkipped: result.insertSkipped,
+      updateErrors: result.updateErrors,
+      insertedCount: result.insertedCount,
+      chunk: meta.chunk,
+      totalChunks: meta.total_chunks,
+    });
+    return NextResponse.json(
+      {
+        error: "partial_failure",
+        delivery_id: deliveryId,
+        persisted: result.insertedCount,
+        failed: lostRows,
+      },
+      { status: 500 }
+    );
+  }
+
+  // Categorisation is enrichment, not durability: rows are already saved with
+  // ai_status='pending' and the categorise cron picks up anything missed here.
+  if (result.insertedCount > 0 || result.updatedAttempted > 0) {
+    after(async () => {
+      try {
+        const categoriseResult = await processPendingCategorisation();
+        console.log("redbark:webhook auto-categorise complete", {
+          deliveryId,
+          categoriseResult,
+        });
+      } catch (error) {
+        console.error("redbark:webhook auto-categorise failed", {
+          deliveryId,
+          error: String(error),
+        });
+      }
+    });
+  }
+
+  console.log("redbark:webhook delivery persisted", {
     deliveryId,
-    newQueued: dataNew.length,
-    updatedQueued: dataUpdated.length,
+    newCount: dataNew.length,
+    updatedCount: dataUpdated.length,
+    insertedCount: result.insertedCount,
+    elapsedMs: result.elapsedMs,
     chunk: meta.chunk,
     totalChunks: meta.total_chunks,
   });
 
   return NextResponse.json({
-    status: "accepted",
+    status: "ok",
     delivery_id: deliveryId,
-    message: "processing_async",
     new_count: dataNew.length,
     updated_count: dataUpdated.length,
+    persisted: result.insertedCount,
     chunk: `${meta.chunk ?? "?"}/${meta.total_chunks ?? "?"}`,
   });
 }
