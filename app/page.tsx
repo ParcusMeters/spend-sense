@@ -10,7 +10,7 @@ import {
 } from "@/lib/utils/dates";
 import { BalanceCards } from "@/components/dashboard/BalanceCards";
 import { TrendAndDailySection } from "@/components/dashboard/TrendAndDailySection";
-import { SpendingChart } from "@/components/dashboard/SpendingChart";
+import { WeeklySummary } from "@/components/dashboard/WeeklySummary";
 import {
   getCategoryColor,
   isTransferCategory,
@@ -21,7 +21,7 @@ import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { SavingsProjection } from "@/components/dashboard/SavingsProjection";
 import { DashboardRealtime } from "@/components/dashboard/DashboardRealtime";
 import { AuthGate } from "@/components/auth/AuthGate";
-import { format, addMonths, startOfMonth, getDay, getDate, getDaysInMonth } from "date-fns";
+import { format, addMonths, startOfMonth, subDays, getDay, getDate, getDaysInMonth } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Repeat } from "lucide-react";
 import { formatCurrency } from "@/lib/utils/currency";
@@ -31,6 +31,7 @@ import {
 } from "@/lib/redbark/sync-balances";
 import { SpendingGoalTracker } from "@/components/dashboard/SpendingGoalTracker";
 import { getCurrentWeek } from "@/lib/utils/dates";
+import { buildWeeklySummary, type WeekTxnLite } from "@/lib/dashboard/weekly-summary";
 import { RunCategoriseButton } from "@/components/dashboard/RunCategoriseButton";
 
 async function DashboardContent() {
@@ -209,6 +210,19 @@ async function DashboardContent() {
       days: 35,
     });
 
+  // Last 7 days plus the 7 before it, for the week-on-week comparison. Needs
+  // description/merchant, which the trend query does not select.
+  const fortnightStart = format(subDays(new Date(), 13), "yyyy-MM-dd");
+  const { data: fortnightTxns } = await supabase
+    .from("transactions")
+    .select(
+      "date, direction, amount_cents, ai_category, redbark_category, user_category_override, description, merchant"
+    )
+    .gte("date", fortnightStart)
+    .order("date", { ascending: false });
+
+  const weeklySummary = buildWeeklySummary((fortnightTxns ?? []) as WeekTxnLite[]);
+
   const monthIncomeMap: Record<string, number> = {};
   const monthSpendMap: Record<string, Record<string, number>> = {};
   const monthCategoryTotals: Record<string, number> = {};
@@ -375,7 +389,7 @@ async function DashboardContent() {
         </Card>
       </div>
 
-      <SpendingChart data={spendingByCategory} />
+      <WeeklySummary summary={weeklySummary} />
 
       <TrendAndDailySection
         monthlyTrendData={monthlyTrendData}
@@ -383,6 +397,7 @@ async function DashboardContent() {
         trendTxns={trendTxns}
         initialDailyData={dailySpendingData}
         initialDailyCategories={dailyCategories}
+        defaultSpendingByCategory={spendingByCategory}
         monthlyBudgetCents={monthlyBudgetCents}
         dailyBudgetCents={dailyBudgetCents}
       />

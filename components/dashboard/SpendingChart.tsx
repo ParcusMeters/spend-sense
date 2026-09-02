@@ -9,6 +9,8 @@ interface SpendingChartProps {
     value: number;
     color: string;
   }[];
+  title?: string;
+  emptyLabel?: string;
 }
 
 interface PieTooltipEntry {
@@ -48,20 +50,24 @@ function SpendingPieTooltip({ active, payload }: PieTooltipProps) {
   );
 }
 
-export function SpendingChart({ data }: SpendingChartProps) {
+export function SpendingChart({
+  data,
+  title = "Spending by Category (Last 6 Months)",
+  emptyLabel = "the last 6 months",
+}: SpendingChartProps) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
   const hasData = data.length > 0 && total > 0;
 
   return (
     <Card className="w-full min-w-0">
       <CardHeader>
-        <CardTitle>Spending by Category (Last 6 Months)</CardTitle>
+        <CardTitle>{title}</CardTitle>
       </CardHeader>
       <CardContent>
         {!hasData ? (
           <div className="flex min-h-[220px] flex-col items-center justify-center text-center">
             <p className="text-sm text-muted-foreground">
-              No spending categories for the last 6 months.
+              No spending categories for {emptyLabel}.
             </p>
             <p className="mt-2 text-xs text-muted-foreground">
               This can happen when all debit transactions are categorized as{" "}

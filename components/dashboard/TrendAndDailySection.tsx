@@ -3,9 +3,14 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMonthLabel } from "@/lib/utils/dates";
-import { buildDailySpendingChartData, type TrendTxnLite } from "@/lib/dashboard/spending-chart-data";
+import {
+  buildCategoryBreakdown,
+  buildDailySpendingChartData,
+  type TrendTxnLite,
+} from "@/lib/dashboard/spending-chart-data";
 import { MonthlyTrend } from "./MonthlyTrend";
 import { DailySpendingCategoryChart } from "./DailySpendingCategoryChart";
+import { SpendingChart } from "./SpendingChart";
 import { Button } from "@/components/ui/button";
 
 type TrendCategory = { key: string; name: string; color: string };
@@ -16,6 +21,8 @@ interface TrendAndDailySectionProps {
   trendTxns: TrendTxnLite[];
   initialDailyData: Record<string, string | number>[];
   initialDailyCategories: TrendCategory[];
+  /** Category wheel shown when no month is selected (server-computed, last 6 months). */
+  defaultSpendingByCategory: { name: string; value: number; color: string }[];
   monthlyBudgetCents?: number | null;
   dailyBudgetCents?: number | null;
 }
@@ -26,6 +33,7 @@ export function TrendAndDailySection({
   trendTxns,
   initialDailyData,
   initialDailyCategories,
+  defaultSpendingByCategory,
   monthlyBudgetCents,
   dailyBudgetCents,
 }: TrendAndDailySectionProps) {
@@ -44,13 +52,34 @@ export function TrendAndDailySection({
   const displayDailyData = monthDaily?.data ?? initialDailyData;
   const displayDailyCategories = monthDaily?.categories ?? initialDailyCategories;
 
-  const dailyTitle =
-    selectedMonthKey && /^\d{4}-\d{2}$/.test(selectedMonthKey)
-      ? `Daily Spending — ${getMonthLabel(`${selectedMonthKey}-01`)}`
-      : "Daily Spending by Category";
+  // The wheel follows the same month selection as the daily chart, so clicking a
+  // month re-cuts the category split instead of leaving a stale 6-month view.
+  const monthCategories = useMemo(() => {
+    if (!selectedMonthKey) return null;
+    return buildCategoryBreakdown(trendTxns, {
+      kind: "month",
+      monthKey: selectedMonthKey,
+    });
+  }, [trendTxns, selectedMonthKey]);
+
+  const isMonthSelected = Boolean(selectedMonthKey && /^\d{4}-\d{2}$/.test(selectedMonthKey));
+  const monthLabel = isMonthSelected ? getMonthLabel(`${selectedMonthKey}-01`) : null;
+
+  const dailyTitle = monthLabel
+    ? `Daily Spending — ${monthLabel}`
+    : "Daily Spending by Category";
 
   return (
     <div className="space-y-6">
+      <SpendingChart
+        data={monthCategories ?? defaultSpendingByCategory}
+        title={
+          monthLabel
+            ? `Spending by Category — ${monthLabel}`
+            : "Spending by Category (Last 6 Months)"
+        }
+        emptyLabel={monthLabel ?? "the last 6 months"}
+      />
       <MonthlyTrend
         data={monthlyTrendData}
         categories={monthlyTrendCategories}

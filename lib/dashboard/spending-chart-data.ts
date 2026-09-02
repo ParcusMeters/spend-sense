@@ -65,6 +65,35 @@ function effectiveCategory(t: TrendTxnLite): string {
   return t.user_category_override ?? t.ai_category ?? t.redbark_category ?? "Other";
 }
 
+/**
+ * Spending per category over a month or an explicit date range, using the same
+ * rules as the daily chart: debits only, transfers excluded, override > ai > bank.
+ */
+export function buildCategoryBreakdown(
+  txns: TrendTxnLite[],
+  spec: { kind: "month"; monthKey: string } | { kind: "range"; start: string; end: string }
+): { name: string; value: number; color: string }[] {
+  const totals: Record<string, number> = {};
+
+  for (const t of txns) {
+    if (t.direction !== "debit") continue;
+    const cat = effectiveCategory(t);
+    if (isTransferCategory(cat)) continue;
+
+    if (spec.kind === "month") {
+      if (transactionMonthKey(t.date) !== spec.monthKey) continue;
+    } else if (t.date < spec.start || t.date > spec.end) {
+      continue;
+    }
+
+    totals[cat] = (totals[cat] ?? 0) + Math.abs(t.amount_cents);
+  }
+
+  return Object.entries(totals)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, value]) => ({ name, value, color: getCategoryColor(name) }));
+}
+
 export function buildDailySpendingChartData(
   txns: TrendTxnLite[],
   spec:
