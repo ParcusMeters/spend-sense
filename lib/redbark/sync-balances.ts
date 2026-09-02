@@ -31,6 +31,7 @@ type LocalAccountRow = {
   id: string;
   redbark_name: string;
   redbark_account_id: string | null;
+  user_id: string;
 };
 
 function normalizeAccountType(apiType: string): string {
@@ -143,7 +144,7 @@ export async function syncRedbarkBalancesToDatabase(
 
     const { data: locals, error: localErr } = await supabase
       .from("accounts")
-      .select("id, redbark_name, redbark_account_id");
+      .select("id, redbark_name, redbark_account_id, user_id");
 
     if (localErr) {
       console.error("syncRedbarkBalancesToDatabase: failed to read accounts", localErr);
@@ -152,6 +153,12 @@ export async function syncRedbarkBalancesToDatabase(
 
     const localRows = (locals ?? []) as LocalAccountRow[];
     const matchedLocalIds = new Set<string>();
+    // accounts.user_id is NOT NULL and the table is unique on (redbark_name, user_id),
+    // so a new account row needs an explicit owner.
+    const knownOwnerIds = new Set(localRows.map((l) => l.user_id));
+    const ownerUserId =
+      process.env.REDBARK_OWNER_USER_ID?.trim() ||
+      (knownOwnerIds.size === 1 ? [...knownOwnerIds][0] : null);
     let updated = 0;
     const now = new Date().toISOString();
 
@@ -196,10 +203,36 @@ export async function syncRedbarkBalancesToDatabase(
         }
         updated++;
       } else {
+        if (!ownerUserId) {
+          console.error(
+            "syncRedbarkBalancesToDatabase: cannot create account without an owner user_id",
+            { accountName: acc.name, redbarkAccountId: acc.id, knownOwnerCount: knownOwnerIds.size }
+          );
+          continue;
+        }
+
+        // Redbark account names are not unique (e.g. two CommBank "Smart Access" accounts),
+        // but accounts is unique on (redbark_name, user_id). Upserting here would silently
+        // overwrite the other account's row with this one's balance, so leave it alone.
+        const nameTaken = localRows.find((l) => l.redbark_name === acc.name);
+        if (nameTaken) {
+          console.warn(
+            "syncRedbarkBalancesToDatabase: skipping account, name already used by another row",
+            {
+              accountName: acc.name,
+              redbarkAccountId: acc.id,
+              existingAccountRowId: nameTaken.id,
+              existingRedbarkAccountId: nameTaken.redbark_account_id,
+            }
+          );
+          continue;
+        }
+
         const { error } = await supabase.from("accounts").upsert(
           {
             redbark_account_id: acc.id,
             redbark_name: acc.name,
+            user_id: ownerUserId,
             institution,
             type,
             balance: balanceDollars,
@@ -207,7 +240,7 @@ export async function syncRedbarkBalancesToDatabase(
             last_synced_at: now,
             updated_at: now,
           },
-          { onConflict: "redbark_name" }
+          { onConflict: "redbark_name,user_id" }
         );
 
         if (error) {

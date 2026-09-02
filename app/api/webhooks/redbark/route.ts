@@ -4,6 +4,15 @@ import type { RedbarkTransaction } from "@/lib/redbark/types";
 import { createServiceClient } from "@/lib/supabase/server";
 import { processPendingCategorisation } from "@/lib/categorise/process-pending";
 
+type AccountRow = {
+  id: string;
+  redbark_name: string;
+  redbark_account_id: string | null;
+  user_id: string;
+};
+
+type AccountRef = { id: string; userId: string; redbarkAccountId: string | null };
+
 type TransactionsSyncedPayload = {
   id?: string;
   object?: string;
@@ -114,54 +123,129 @@ async function processTransactionsSyncedPayload(
 
   const supabase = createServiceClient();
 
-  const accountMap = new Map<string, string>();
   const allTransactions = [...dataNew, ...dataUpdated];
   const distinctAccountLabels = new Set<string>();
+
+  // accounts and transactions are both owned rows: user_id is NOT NULL, and accounts is
+  // unique on (redbark_name, user_id). Existing account rows are the source of truth for
+  // the owner, so load them once and resolve every txn against them.
+  const { data: existingAccounts, error: accountsErr } = await supabase
+    .from("accounts")
+    .select("id, redbark_name, redbark_account_id, user_id");
+
+  if (accountsErr) {
+    console.error("redbark:webhook failed to load accounts", {
+      deliveryId,
+      error: accountsErr.message,
+      code: accountsErr.code,
+    });
+    return;
+  }
+
+  const byRedbarkAccountId = new Map<string, AccountRef>();
+  const byName = new Map<string, AccountRef>();
+  const knownOwnerIds = new Set<string>();
+
+  for (const a of (existingAccounts ?? []) as AccountRow[]) {
+    const ref: AccountRef = {
+      id: a.id,
+      userId: a.user_id,
+      redbarkAccountId: a.redbark_account_id,
+    };
+    if (a.redbark_account_id) byRedbarkAccountId.set(a.redbark_account_id, ref);
+    byName.set(a.redbark_name, ref);
+    knownOwnerIds.add(a.user_id);
+  }
+
+  const ownerUserId =
+    process.env.REDBARK_OWNER_USER_ID?.trim() ||
+    (knownOwnerIds.size === 1 ? [...knownOwnerIds][0] : null);
+
+  const accountMap = new Map<string, AccountRef>();
   let accountUpserts = 0;
 
   for (const txn of allTransactions) {
     const accountLabel = txn.account_name ?? txn.account;
     distinctAccountLabels.add(accountLabel);
-    if (!accountMap.has(accountLabel)) {
-      const institution = accountLabel.toLowerCase().includes("up")
-        ? "Up Bank"
-        : "CommBank";
-      const type = accountLabel.toLowerCase().includes("saver") ||
-        accountLabel.toLowerCase().includes("saving")
-        ? "savings"
-        : accountLabel.toLowerCase().includes("invest")
-          ? "investment"
-          : "transaction";
+    if (accountMap.has(accountLabel)) continue;
 
-      const row: Record<string, unknown> = {
-        redbark_name: accountLabel,
-        institution,
-        type,
-        last_synced_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      if (txn.account_id) {
-        row.redbark_account_id = txn.account_id;
-      }
+    const known =
+      (txn.account_id ? byRedbarkAccountId.get(txn.account_id) : undefined) ??
+      byName.get(accountLabel);
 
-      const { data: account, error: accErr } = await supabase
-        .from("accounts")
-        .upsert(row, { onConflict: "redbark_name" })
-        .select("id")
-        .single();
-
-      if (accErr) {
-        console.error("redbark:webhook account upsert failed", {
+    if (known) {
+      // Redbark account names are not unique (two live accounts can share a label), but
+      // accounts is unique on (redbark_name, user_id) — so a name-only match may fold a
+      // second Redbark account into an existing row. Surface it rather than hide it.
+      if (txn.account_id && known.redbarkAccountId && known.redbarkAccountId !== txn.account_id) {
+        console.warn("redbark:webhook account matched by name, not by redbark id", {
           deliveryId,
           accountLabel,
-          redbarkAccountId: txn.account_id,
-          error: accErr.message,
-          code: accErr.code,
+          payloadRedbarkAccountId: txn.account_id,
+          matchedRedbarkAccountId: known.redbarkAccountId,
         });
-      } else if (account) {
-        accountMap.set(accountLabel, account.id);
-        accountUpserts++;
       }
+      accountMap.set(accountLabel, known);
+      continue;
+    }
+
+    if (!ownerUserId) {
+      console.error("redbark:webhook cannot create account without an owner user_id", {
+        deliveryId,
+        accountLabel,
+        redbarkAccountId: txn.account_id ?? null,
+        knownOwnerCount: knownOwnerIds.size,
+        hint: "set REDBARK_OWNER_USER_ID when more than one user owns accounts",
+      });
+      continue;
+    }
+
+    const institution = accountLabel.toLowerCase().includes("up")
+      ? "Up Bank"
+      : "CommBank";
+    const type = accountLabel.toLowerCase().includes("saver") ||
+      accountLabel.toLowerCase().includes("saving")
+      ? "savings"
+      : accountLabel.toLowerCase().includes("invest")
+        ? "investment"
+        : "transaction";
+
+    const row: Record<string, unknown> = {
+      redbark_name: accountLabel,
+      user_id: ownerUserId,
+      institution,
+      type,
+      last_synced_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    if (txn.account_id) {
+      row.redbark_account_id = txn.account_id;
+    }
+
+    const { data: account, error: accErr } = await supabase
+      .from("accounts")
+      .upsert(row, { onConflict: "redbark_name,user_id" })
+      .select("id, user_id")
+      .single();
+
+    if (accErr) {
+      console.error("redbark:webhook account upsert failed", {
+        deliveryId,
+        accountLabel,
+        redbarkAccountId: txn.account_id,
+        error: accErr.message,
+        code: accErr.code,
+      });
+    } else if (account) {
+      const ref: AccountRef = {
+        id: account.id,
+        userId: account.user_id,
+        redbarkAccountId: txn.account_id ?? null,
+      };
+      accountMap.set(accountLabel, ref);
+      byName.set(accountLabel, ref);
+      if (txn.account_id) byRedbarkAccountId.set(txn.account_id, ref);
+      accountUpserts++;
     }
   }
 
@@ -169,16 +253,19 @@ async function processTransactionsSyncedPayload(
     deliveryId,
     distinctAccountLabels: [...distinctAccountLabels].sort(),
     distinctAccountCount: distinctAccountLabels.size,
+    existingAccountRows: existingAccounts?.length ?? 0,
     accountUpsertsThisRun: accountUpserts,
     mapSize: accountMap.size,
+    ownerUserIdResolved: Boolean(ownerUserId),
   });
 
   let insertedCount = 0;
   let insertErrors = 0;
+  let insertSkipped = 0;
   for (const txn of dataNew) {
     const label = txn.account_name ?? txn.account;
-    const accountId = accountMap.get(label);
-    if (!accountId) {
+    const account = accountMap.get(label);
+    if (!account) {
       console.warn("redbark:webhook new txn missing resolved account row", {
         deliveryId,
         redbarkId: txn.id,
@@ -187,12 +274,25 @@ async function processTransactionsSyncedPayload(
       });
     }
 
+    // transactions.user_id is NOT NULL; without an owner the row cannot be written at all.
+    const userId = account?.userId ?? ownerUserId;
+    if (!userId) {
+      insertSkipped++;
+      console.error("redbark:webhook new txn skipped (no owner user_id)", {
+        deliveryId,
+        redbarkId: txn.id,
+        accountLabel: label,
+      });
+      continue;
+    }
+
     const { error } = await supabase
       .from("transactions")
       .upsert(
         {
           redbark_id: txn.id,
-          account_id: accountId,
+          user_id: userId,
+          account_id: account?.id ?? null,
           date: txn.transaction_date,
           description: txn.description,
           amount_cents: txn.amount,
@@ -276,6 +376,7 @@ async function processTransactionsSyncedPayload(
     chunk: meta.chunk != null && meta.total_chunks != null ? `${meta.chunk}/${meta.total_chunks}` : undefined,
     insertedCount,
     insertErrors,
+    insertSkipped,
     updatedAttempted: dataUpdated.length,
     updateErrors,
     elapsedMs,
