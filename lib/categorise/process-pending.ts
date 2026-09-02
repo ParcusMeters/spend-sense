@@ -73,6 +73,13 @@ export async function processPendingCategorisation(
   const deadline = options?.deadline ?? Number.POSITIVE_INFINITY;
   const maxTransactions = options?.maxTransactions ?? Number.POSITIVE_INFINITY;
 
+  // Keep the internal-transfer flag current for rows that have just landed. This
+  // is deterministic SQL, not a model call, and is cheap enough to run each time.
+  const { error: transferError } = await supabase.rpc("refresh_internal_transfers");
+  if (transferError) {
+    console.error("categorise-pending: refresh_internal_transfers failed", transferError);
+  }
+
   // Reclaim rows abandoned by a previous run before deciding what is outstanding.
   const staleBefore = new Date(startedAt - STALE_PROCESSING_MS).toISOString();
   const { data: recovered, error: recoverError } = await supabase

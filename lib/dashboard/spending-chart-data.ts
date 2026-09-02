@@ -57,7 +57,28 @@ export type TrendTxnLite = {
   ai_category: string | null;
   redbark_category: string | null;
   user_category_override: string | null;
+  /** Set by refresh_internal_transfers(): a move between the user's own accounts. */
+  is_internal_transfer?: boolean | null;
 };
+
+/**
+ * Money moving between the user's own accounts is neither income nor spending —
+ * counting it in either direction just inflates both sides of the picture.
+ *
+ * Excluded on two grounds: the structural flag, which is computed in the database
+ * and does not depend on the categoriser getting it right, and a transfer-ish
+ * category, which is kept so a manual override still works.
+ */
+export function isExcludedFromTotals(t: {
+  is_internal_transfer?: boolean | null;
+  user_category_override?: string | null;
+  ai_category?: string | null;
+  redbark_category?: string | null;
+}): boolean {
+  if (t.is_internal_transfer) return true;
+  const cat = t.user_category_override ?? t.ai_category ?? t.redbark_category ?? "Other";
+  return isTransferCategory(cat);
+}
 
 export type DailyChartCategory = { key: string; name: string; color: string };
 
@@ -77,8 +98,8 @@ export function buildCategoryBreakdown(
 
   for (const t of txns) {
     if (t.direction !== "debit") continue;
+    if (isExcludedFromTotals(t)) continue;
     const cat = effectiveCategory(t);
-    if (isTransferCategory(cat)) continue;
 
     if (spec.kind === "month") {
       if (transactionMonthKey(t.date) !== spec.monthKey) continue;
@@ -125,8 +146,8 @@ export function buildDailySpendingChartData(
 
   for (const t of txns) {
     if (t.direction !== "debit") continue;
+    if (isExcludedFromTotals(t)) continue;
     const cat = effectiveCategory(t);
-    if (isTransferCategory(cat)) continue;
 
     if (spec.kind === "month") {
       if (transactionMonthKey(t.date) !== spec.monthKey) continue;

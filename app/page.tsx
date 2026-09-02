@@ -13,7 +13,7 @@ import { TrendAndDailySection } from "@/components/dashboard/TrendAndDailySectio
 import { WeeklySummary } from "@/components/dashboard/WeeklySummary";
 import {
   getCategoryColor,
-  isTransferCategory,
+  isExcludedFromTotals,
   isReimbursementCategory,
   buildDailySpendingChartData,
 } from "@/lib/dashboard/spending-chart-data";
@@ -56,21 +56,23 @@ async function DashboardContent() {
   }) => t.user_category_override ?? t.ai_category ?? t.redbark_category ?? "Other";
 
   const incomeThisMonth = txns
-    .filter((t) => t.direction === "credit" && effectiveCategory(t) === "Salary")
+    .filter(
+      (t) =>
+        t.direction === "credit" &&
+        !t.is_internal_transfer &&
+        effectiveCategory(t) === "Salary"
+    )
     .reduce((sum, t) => sum + t.amount_cents, 0);
 
   const grossSpendingThisMonth = txns
-    .filter(
-      (t) =>
-        t.direction === "debit" &&
-        !isTransferCategory(effectiveCategory(t))
-    )
+    .filter((t) => t.direction === "debit" && !isExcludedFromTotals(t))
     .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
 
   const reimbursementsThisMonth = txns
     .filter(
       (t) =>
         t.direction === "credit" &&
+        !t.is_internal_transfer &&
         isReimbursementCategory(effectiveCategory(t))
     )
     .reduce((sum, t) => sum + t.amount_cents, 0);
@@ -79,10 +81,7 @@ async function DashboardContent() {
 
   const recurringSpendingThisMonth = txns
     .filter(
-      (t) =>
-        t.direction === "debit" &&
-        t.is_recurring === true &&
-        !isTransferCategory(effectiveCategory(t))
+      (t) => t.direction === "debit" && t.is_recurring === true && !isExcludedFromTotals(t)
     )
     .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
 
@@ -90,22 +89,21 @@ async function DashboardContent() {
   const { start: weekStart, end: weekEnd } = getCurrentWeek();
   const { data: weekTxns } = await supabase
     .from("transactions")
-    .select("amount_cents, direction, ai_category, redbark_category, user_category_override")
+    .select(
+      "amount_cents, direction, ai_category, redbark_category, user_category_override, is_internal_transfer"
+    )
     .gte("date", weekStart)
     .lte("date", weekEnd);
 
   const grossWeeklySpending = (weekTxns ?? [])
-    .filter(
-      (t) =>
-        t.direction === "debit" &&
-        !isTransferCategory(effectiveCategory(t))
-    )
+    .filter((t) => t.direction === "debit" && !isExcludedFromTotals(t))
     .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
 
   const weeklyReimbursements = (weekTxns ?? [])
     .filter(
       (t) =>
         t.direction === "credit" &&
+        !t.is_internal_transfer &&
         isReimbursementCategory(effectiveCategory(t))
     )
     .reduce((sum, t) => sum + t.amount_cents, 0);
@@ -134,7 +132,9 @@ async function DashboardContent() {
   // Monthly trend (last 6 months)
   const { data: allTxns } = await supabase
     .from("transactions")
-    .select("date, direction, amount_cents, ai_category, redbark_category, user_category_override")
+    .select(
+      "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer"
+    )
     .gte("date", sixMonthStart)
     .lte("date", monthEnd);
 
@@ -168,13 +168,16 @@ async function DashboardContent() {
     ai_category: string | null;
     redbark_category: string | null;
     user_category_override: string | null;
+    is_internal_transfer: boolean | null;
   }[] = [];
 
   if (firstTxn?.date && lastTxn?.date && monthKeys.length > 0) {
     for (let offset = 0; ; offset += TREND_PAGE) {
       const { data: page, error: trendPageError } = await supabase
         .from("transactions")
-        .select("date, direction, amount_cents, ai_category, redbark_category, user_category_override")
+        .select(
+          "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer"
+        )
         .gte("date", firstTxn.date)
         .lte("date", lastTxn.date)
         .order("date", { ascending: true })
@@ -195,7 +198,7 @@ async function DashboardContent() {
   for (const t of allTxns ?? []) {
     if (t.direction !== "debit") continue;
     const cat = effectiveCategory(t);
-    if (isTransferCategory(cat)) continue;
+    if (isExcludedFromTotals(t)) continue;
     categoryMap[cat] = (categoryMap[cat] ?? 0) + Math.abs(t.amount_cents);
   }
   const sortedCategories = Object.entries(categoryMap).sort((a, b) => b[1] - a[1]);
@@ -233,7 +236,7 @@ async function DashboardContent() {
     const monthKey = transactionMonthKey(t.date);
     if (!monthKey || !monthKeySet.has(monthKey)) continue;
     const cat = effectiveCategory(t);
-    if (isTransferCategory(cat)) continue;
+    if (isExcludedFromTotals(t)) continue;
 
     if (t.direction === "credit" && cat === "Salary") {
       monthIncomeMap[monthKey] = (monthIncomeMap[monthKey] ?? 0) + t.amount_cents;
@@ -288,7 +291,7 @@ async function DashboardContent() {
     if (!m) continue;
     if (!monthlyData[m]) monthlyData[m] = { income: 0, spending: 0 };
     const cat = effectiveCategory(t);
-    if (isTransferCategory(cat)) continue;
+    if (isExcludedFromTotals(t)) continue;
     if (t.direction === "credit" && cat === "Salary") {
       monthlyData[m].income += t.amount_cents;
     } else if (t.direction === "credit" && isReimbursementCategory(cat)) {

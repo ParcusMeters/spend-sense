@@ -1,7 +1,7 @@
 import { format, subDays } from "date-fns";
 import {
   getCategoryColor,
-  isTransferCategory,
+  isExcludedFromTotals,
   type TrendTxnLite,
 } from "./spending-chart-data";
 
@@ -30,7 +30,7 @@ function effectiveCategory(t: WeekTxnLite): string {
 }
 
 function isSpend(t: WeekTxnLite): boolean {
-  return t.direction === "debit" && !isTransferCategory(effectiveCategory(t));
+  return t.direction === "debit" && !isExcludedFromTotals(t);
 }
 
 /**

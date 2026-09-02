@@ -40,6 +40,8 @@ export interface Transaction {
   user_category_override: string | null;
   is_recurring: boolean;
   is_anomaly: boolean;
+  /** Movement between the user's own accounts; excluded from income and spending. */
+  is_internal_transfer?: boolean | null;
   anomaly_reason: string | null;
   ai_status: "pending" | "processing" | "done" | "failed";
   post_date: string | null;

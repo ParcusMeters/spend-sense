@@ -74,8 +74,9 @@ export async function generateDigest(
     };
   }
 
-  const debits = transactions.filter((t) => t.direction === "debit");
-  const credits = transactions.filter((t) => t.direction === "credit");
+  const spendable = transactions.filter((t) => !t.is_internal_transfer);
+  const debits = spendable.filter((t) => t.direction === "debit");
+  const credits = spendable.filter((t) => t.direction === "credit");
   const grossSpending = debits.reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
   const reimbursements = credits
     .filter((t) => t.ai_category === "Reimbursements")

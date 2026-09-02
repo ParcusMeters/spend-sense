@@ -13,14 +13,17 @@ async function ProjectionsContent() {
 
   const { data: txns } = await supabase
     .from("transactions")
-    .select("date, direction, amount_cents, ai_category, redbark_category, user_category_override")
+    .select(
+      "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer"
+    )
     .gte("date", start);
 
   const monthlyData: Record<string, { income: number; spending: number }> = {};
   for (const t of txns ?? []) {
     const m = t.date.slice(0, 7);
     if (!monthlyData[m]) monthlyData[m] = { income: 0, spending: 0 };
-    const cat = t.ai_category ?? t.user_category_override ?? t.redbark_category;
+    if (t.is_internal_transfer) continue;
+    const cat = t.user_category_override ?? t.ai_category ?? t.redbark_category;
     if (cat === "Transfers") continue;
     if (t.direction === "credit" && cat === "Salary") {
       monthlyData[m].income += t.amount_cents;
