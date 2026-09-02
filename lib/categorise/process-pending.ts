@@ -1,16 +1,9 @@
 import { createServiceClient } from "@/lib/supabase/server";
-import { detectAnomalies } from "@/lib/ai/anomaly";
+import { detectAnomaliesForBatch } from "@/lib/ai/anomaly";
 import { categoriseTransactions } from "@/lib/ai/categorise";
 
 const BATCH_SIZE = 10;
-/**
- * How many transactions in a batch are finalised at once.
- *
- * detectAnomalies makes its own Claude call per transaction, so doing this
- * sequentially meant a batch of 10 cost ~11 serial model calls — measured at 113s,
- * which no serverless invocation can absorb. These calls are independent, so they
- * overlap; keep the width modest to stay clear of API rate limits.
- */
+/** How many row writes in a batch are issued at once. */
 const FINALISE_CONCURRENCY = 10;
 
 /**
@@ -173,6 +166,26 @@ export async function processPendingCategorisation(
       const results = await categoriseTransactions(toCateg, { batchIndex });
       const resultMap = new Map(results.map((r) => [r.redbark_id, r]));
 
+      // Anomaly detection for the whole batch: at most one model call, and none
+      // when nothing shows a signal. Done before the writes so each row's update
+      // and its anomaly flag land together.
+      const categorised = batch.flatMap((txn) => {
+        const result = resultMap.get(txn.redbark_id);
+        return result
+          ? [
+              {
+                transactionId: txn.id,
+                merchant: result.merchant_clean,
+                amountCents: txn.amount_cents,
+                date: txn.date,
+                isRecurring: result.is_recurring,
+              },
+            ]
+          : [];
+      });
+
+      const anomaliesByTxn = await detectAnomaliesForBatch(categorised);
+
       const outcomes = await mapWithConcurrency(
         batch,
         FINALISE_CONCURRENCY,
@@ -199,30 +212,23 @@ export async function processPendingCategorisation(
             })
             .eq("id", txn.id);
 
-          try {
-            const anomalies = await detectAnomalies(
-              txn.id,
-              result.merchant_clean,
-              txn.amount_cents,
-              txn.date,
-              result.is_recurring
-            );
-
-            if (anomalies.length > 0) {
+          const anomalies = anomaliesByTxn.get(txn.id) ?? [];
+          if (anomalies.length > 0) {
+            try {
               await supabase
                 .from("transactions")
                 .update({ is_anomaly: true, anomaly_reason: anomalies[0].description })
                 .eq("id", txn.id);
 
               await supabase.from("anomalies").insert(anomalies);
+            } catch (anomalyErr) {
+              // The transaction is already categorised; failing to record an
+              // anomaly is not a reason to redo the categorisation.
+              console.error("categorise-pending: recording anomaly failed", {
+                txnId: txn.id,
+                error: String(anomalyErr),
+              });
             }
-          } catch (anomalyErr) {
-            // The transaction is already categorised; a failed anomaly pass is not
-            // a reason to mark it failed and redo the categorisation.
-            console.error("categorise-pending: anomaly detection failed", {
-              txnId: txn.id,
-              error: String(anomalyErr),
-            });
           }
 
           return "processed";

@@ -17,6 +17,44 @@ interface AnomalyResult {
   severity: "low" | "medium" | "high";
 }
 
+export type AnomalyCandidate = {
+  transactionId: string;
+  merchant: string | null;
+  amountCents: number;
+  date: string;
+  isRecurring: boolean;
+};
+
+/**
+ * Deterministic signals for one transaction, gathered from the database.
+ *
+ * Whether a transaction is anomalous is decided entirely by these flags — the
+ * model only phrases the finding, and its output is post-filtered by the same
+ * flags. So a transaction with no signal has nothing to say and is never sent.
+ */
+type AnomalyEvidence = AnomalyCandidate & {
+  duplicateLikely: boolean;
+  unusualAmountLikely: boolean;
+  subscriptionChangeLikely: boolean;
+  unusualMerchantLikely: boolean;
+  unusualTimeStrongLikely: boolean;
+  averageAmountCents: number | null;
+  previousRecurringAmountCents: number | null;
+};
+
+const ALLOWED_TYPES: AnomalyType[] = [
+  "duplicate",
+  "unusual_amount",
+  "unusual_merchant",
+  "unusual_time",
+  "subscription_change",
+];
+
+const ALLOWED_SEVERITIES: AnomalyResult["severity"][] = ["low", "medium", "high"];
+
+/** How many transactions have their evidence gathered at once. */
+const EVIDENCE_CONCURRENCY = 10;
+
 function extractJsonArray(candidate: string): string | null {
   const text = candidate.trim();
   const start = text.indexOf("[");
@@ -25,256 +63,219 @@ function extractJsonArray(candidate: string): string | null {
   return text.slice(start, end + 1);
 }
 
-async function detectAnomaliesHeuristic(
-  supabase: ReturnType<typeof createServiceClient>,
-  transactionId: string,
-  merchant: string | null,
-  amountCents: number,
-  date: string,
-  isRecurring: boolean,
-): Promise<AnomalyResult[]> {
-  const anomalies: AnomalyResult[] = [];
-
-  // 1. Duplicate detection: same merchant + same amount + same day
-  if (merchant) {
-    const { data: dupes } = await supabase
-      .from("transactions")
-      .select("id")
-      .eq("merchant", merchant)
-      .eq("amount_cents", amountCents)
-      .eq("date", date)
-      .neq("id", transactionId);
-
-    if (dupes && dupes.length > 0) {
-      anomalies.push({
-        transaction_id: transactionId,
-        type: "duplicate",
-        description: `Possible duplicate: same merchant (${merchant}), amount ($${Math.abs(amountCents) / 100}), and date`,
-        severity: "high",
-      });
-    }
-  }
-
-  // 2. Unusual amount: compare to average for this merchant
-  if (merchant) {
-    const { data: history } = await supabase
-      .from("transactions")
-      .select("amount_cents")
-      .eq("merchant", merchant)
-      .neq("id", transactionId)
-      .order("date", { ascending: false })
-      .limit(20);
-
-    if (history && history.length >= 3) {
-      const amounts = history.map((t) => Math.abs(t.amount_cents));
-      const avg = amounts.reduce((a, b) => a + b, 0) / amounts.length;
-      const absAmount = Math.abs(amountCents);
-
-      if (absAmount > avg * 2 && absAmount - avg > 2000) {
-        anomalies.push({
-          transaction_id: transactionId,
-          type: "unusual_amount",
-          description: `Unusual amount: $${(absAmount / 100).toFixed(2)} vs average $${(avg / 100).toFixed(2)} at ${merchant}`,
-          severity: absAmount > avg * 3 ? "high" : "medium",
-        });
-      }
-    }
-  }
-
-  // 3. Subscription change: recurring charge with different amount
-  if (isRecurring && merchant) {
-    const { data: previous } = await supabase
-      .from("transactions")
-      .select("amount_cents")
-      .eq("merchant", merchant)
-      .eq("is_recurring", true)
-      .neq("id", transactionId)
-      .order("date", { ascending: false })
-      .limit(1);
-
-    if (previous && previous.length > 0) {
-      const prevAmount = previous[0].amount_cents;
-      if (prevAmount !== amountCents) {
-        anomalies.push({
-          transaction_id: transactionId,
-          type: "subscription_change",
-          description: `Subscription price change at ${merchant}: was $${(Math.abs(prevAmount) / 100).toFixed(2)}, now $${(Math.abs(amountCents) / 100).toFixed(2)}`,
-          severity: "medium",
-        });
-      }
-    }
-  }
-
-  return anomalies;
+function hasAnySignal(e: AnomalyEvidence): boolean {
+  return (
+    e.duplicateLikely ||
+    e.unusualAmountLikely ||
+    e.subscriptionChangeLikely ||
+    e.unusualMerchantLikely ||
+    e.unusualTimeStrongLikely
+  );
 }
 
-async function detectAnomaliesAi(
+async function gatherEvidence(
   supabase: ReturnType<typeof createServiceClient>,
-  transactionId: string,
-  merchant: string | null,
-  amountCents: number,
-  date: string,
-  isRecurring: boolean,
-): Promise<AnomalyResult[]> {
-  // Pull transaction context (needed for unusual_merchant/unusual_time).
+  candidate: AnomalyCandidate
+): Promise<AnomalyEvidence | null> {
+  const { transactionId, amountCents, date, isRecurring } = candidate;
+
   const { data: txnRow } = await supabase
     .from("transactions")
     .select("id, account_id, description, merchant, amount_cents, date, direction")
     .eq("id", transactionId)
     .single();
 
-  if (!txnRow) return [];
+  if (!txnRow) return null;
 
-  const currentMerchant = merchant ?? txnRow.merchant ?? null;
-  const currentDescription = String(txnRow.description ?? "");
+  const merchant = candidate.merchant ?? txnRow.merchant ?? null;
+  const description = String(txnRow.description ?? "");
   const absAmount = Math.abs(amountCents);
-  const absAmountDollars = (absAmount / 100).toFixed(2);
 
-  // Overseas / international keywords are a noisy signal, but it is a
-  // strong "context" indicator for fraud-like anomalies.
-  // This intentionally errs on the side of being conservative.
+  // Overseas context is noisy on its own, but a useful corroborating signal.
   const overseasLikely =
     /(^|[^a-z])(intl|international|overseas|swift|wire|remittance)([^a-z]|$)/i.test(
-      `${currentMerchant ?? ""} ${currentDescription}`,
-    ) ||
-    /(\btransferwise\b|\brevolut\b|\bwise\b)/i.test(
-      `${currentMerchant ?? ""} ${currentDescription}`,
-    );
+      `${merchant ?? ""} ${description}`
+    ) || /(\btransferwise\b|\brevolut\b|\bwise\b)/i.test(`${merchant ?? ""} ${description}`);
 
-  // Evidence: duplicates
-  const { data: dupes } = currentMerchant
-    ? await supabase
-        .from("transactions")
-        .select("id")
-        .eq("merchant", currentMerchant)
-        .eq("amount_cents", amountCents)
-        .eq("date", date)
-        .neq("id", transactionId)
-    : { data: [] as { id: string }[] };
-
-  const duplicateLikely = Boolean(dupes && dupes.length > 0);
-
-  // Evidence: merchant amount history (last 20)
-  let avg = null as number | null;
-  let recentAmounts: number[] = [];
-  if (currentMerchant) {
-    const { data: history } = await supabase
+  const [dupeRes, historyRes, previousRes, seenRes, recentRes] = await Promise.all([
+    merchant
+      ? supabase
+          .from("transactions")
+          .select("id")
+          .eq("merchant", merchant)
+          .eq("amount_cents", amountCents)
+          .eq("date", date)
+          .neq("id", transactionId)
+      : Promise.resolve({ data: [] as { id: string }[] }),
+    merchant
+      ? supabase
+          .from("transactions")
+          .select("amount_cents")
+          .eq("merchant", merchant)
+          .neq("id", transactionId)
+          .order("date", { ascending: false })
+          .limit(20)
+      : Promise.resolve({ data: [] as { amount_cents: number }[] }),
+    isRecurring && merchant
+      ? supabase
+          .from("transactions")
+          .select("amount_cents")
+          .eq("merchant", merchant)
+          .eq("is_recurring", true)
+          .neq("id", transactionId)
+          .order("date", { ascending: false })
+          .limit(1)
+      : Promise.resolve({ data: [] as { amount_cents: number }[] }),
+    merchant
+      ? supabase
+          .from("transactions")
+          .select("id")
+          .eq("account_id", txnRow.account_id)
+          .eq("merchant", merchant)
+          .neq("id", transactionId)
+          .limit(1)
+      : Promise.resolve({ data: [] as { id: string }[] }),
+    supabase
       .from("transactions")
-      .select("amount_cents")
-      .eq("merchant", currentMerchant)
-      .neq("id", transactionId)
+      .select("date")
+      .eq("account_id", txnRow.account_id)
+      .gte("date", new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10))
       .order("date", { ascending: false })
-      .limit(20);
+      .limit(250),
+  ]);
 
-    if (history && history.length > 0) {
-      recentAmounts = history.map((t) => Math.abs(t.amount_cents));
-      const sum = recentAmounts.reduce((a, b) => a + b, 0);
-      avg = sum / recentAmounts.length;
-    }
-  }
+  const duplicateLikely = Boolean(dupeRes.data && dupeRes.data.length > 0);
+
+  const recentAmounts = (historyRes.data ?? []).map((t) => Math.abs(t.amount_cents));
+  const averageAmountCents =
+    recentAmounts.length > 0
+      ? recentAmounts.reduce((a, b) => a + b, 0) / recentAmounts.length
+      : null;
 
   const unusualAmountLikely =
-    avg !== null &&
+    averageAmountCents !== null &&
     recentAmounts.length >= 3 &&
-    absAmount > avg * 2 &&
-    absAmount - avg > 2000;
+    absAmount > averageAmountCents * 2 &&
+    absAmount - averageAmountCents > 2000;
 
-  // Evidence: previous recurring amount (last 1 for same merchant)
-  let previousRecurringAmountCents: number | null = null;
-  if (isRecurring && currentMerchant) {
-    const { data: previous } = await supabase
-      .from("transactions")
-      .select("amount_cents")
-      .eq("merchant", currentMerchant)
-      .eq("is_recurring", true)
-      .neq("id", transactionId)
-      .order("date", { ascending: false })
-      .limit(1);
-
-    if (previous && previous.length > 0) {
-      previousRecurringAmountCents = previous[0].amount_cents;
-    }
-  }
+  const previousRecurringAmountCents =
+    previousRes.data && previousRes.data.length > 0 ? previousRes.data[0].amount_cents : null;
 
   const subscriptionChangeLikely =
     previousRecurringAmountCents !== null && previousRecurringAmountCents !== amountCents;
 
-  // Evidence: unusual_merchant (merchant never seen for this account before)
-  let unusualMerchantLikely = false;
-  if (currentMerchant) {
-    const { data: seen } = await supabase
-      .from("transactions")
-      .select("id")
-      .eq("account_id", txnRow.account_id)
-      .eq("merchant", currentMerchant)
-      .neq("id", transactionId)
-      .limit(1);
+  // A merchant being new is far too sensitive alone; require corroboration.
+  const unusualMerchantLikely = merchant
+    ? (!seenRes.data || seenRes.data.length === 0) && (unusualAmountLikely || overseasLikely)
+    : false;
 
-    // "New merchant" alone is too sensitive; only treat as anomalous when
-    // there's also unusual spend size OR overseas context.
-    unusualMerchantLikely =
-      (!seen || seen.length === 0) && (unusualAmountLikely || overseasLikely);
-  }
-
-  // Evidence: unusual_time (unusual day-of-week for this account)
-  const dayOfWeek = new Date(date + "T00:00:00Z").getUTCDay(); // 0-6
-  const { data: recentForAccount } = await supabase
-    .from("transactions")
-    .select("date")
-    .eq("account_id", txnRow.account_id)
-    .gte("date", new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10))
-    .order("date", { ascending: false })
-    .limit(250);
-
-  const recentDows = (recentForAccount ?? []).map((t) =>
-    new Date(String(t.date) + "T00:00:00Z").getUTCDay()
+  const dayOfWeek = new Date(`${date}T00:00:00Z`).getUTCDay();
+  const recentDows = (recentRes.data ?? []).map((t) =>
+    new Date(`${String(t.date)}T00:00:00Z`).getUTCDay()
   );
-  const dowCount = recentDows.filter((d) => d === dayOfWeek).length;
   const dowTotal = recentDows.length;
-  // "Unusual day-of-week" alone is too sensitive; require unusual spend
-  // size OR overseas context.
-  const unusualTimeLikely =
-    dowTotal > 0 ? dowCount / dowTotal < 0.08 : false;
+  const dowCount = recentDows.filter((d) => d === dayOfWeek).length;
+  const unusualTimeLikely = dowTotal > 0 ? dowCount / dowTotal < 0.08 : false;
   const unusualTimeStrongLikely =
     unusualTimeLikely && (unusualAmountLikely || overseasLikely);
 
-  const prompt = `You are an anomaly detection assistant for personal finance.
-Decide which of the following anomaly types apply to the CURRENT transaction.
-
-CURRENT transaction:
-{
-  "transaction_id": "${transactionId}",
-  "merchant": ${JSON.stringify(currentMerchant)},
-  "amount_cents": ${amountCents},
-  "amount_dollars": ${absAmountDollars},
-  "date": ${JSON.stringify(date)},
-  "is_recurring": ${isRecurring}
+  return {
+    transactionId,
+    merchant,
+    amountCents,
+    date,
+    isRecurring,
+    duplicateLikely,
+    unusualAmountLikely,
+    subscriptionChangeLikely,
+    unusualMerchantLikely,
+    unusualTimeStrongLikely,
+    averageAmountCents,
+    previousRecurringAmountCents,
+  };
 }
 
-EVIDENCE / signals (may be noisy):
-- duplicateLikely: ${duplicateLikely}
-- unusualAmountLikely: ${unusualAmountLikely}
-- subscriptionChangeLikely: ${subscriptionChangeLikely}
-- unusualMerchantLikely: ${unusualMerchantLikely}
-- unusualTimeStrongLikely: ${unusualTimeStrongLikely}
+/** Descriptions derived straight from the evidence, with no model involved. */
+function heuristicFromEvidence(e: AnomalyEvidence): AnomalyResult[] {
+  const anomalies: AnomalyResult[] = [];
+  const absAmount = Math.abs(e.amountCents);
 
-Notes:
-- If the corresponding Likely flag is false, you should usually return no anomaly of that type.
-- If multiple types apply, include multiple objects in the output array.
-- Use concise, human-readable explanations.
+  if (e.duplicateLikely && e.merchant) {
+    anomalies.push({
+      transaction_id: e.transactionId,
+      type: "duplicate",
+      description: `Possible duplicate: same merchant (${e.merchant}), amount ($${absAmount / 100}), and date`,
+      severity: "high",
+    });
+  }
 
-Return ONLY a JSON array. Each element:
+  if (e.unusualAmountLikely && e.merchant && e.averageAmountCents !== null) {
+    anomalies.push({
+      transaction_id: e.transactionId,
+      type: "unusual_amount",
+      description: `Unusual amount: $${(absAmount / 100).toFixed(2)} vs average $${(e.averageAmountCents / 100).toFixed(2)} at ${e.merchant}`,
+      severity: absAmount > e.averageAmountCents * 3 ? "high" : "medium",
+    });
+  }
+
+  if (e.subscriptionChangeLikely && e.merchant && e.previousRecurringAmountCents !== null) {
+    anomalies.push({
+      transaction_id: e.transactionId,
+      type: "subscription_change",
+      description: `Subscription price change at ${e.merchant}: was $${(Math.abs(e.previousRecurringAmountCents) / 100).toFixed(2)}, now $${(absAmount / 100).toFixed(2)}`,
+      severity: "medium",
+    });
+  }
+
+  return anomalies;
+}
+
+async function describeWithAi(flagged: AnomalyEvidence[]): Promise<Map<string, AnomalyResult[]>> {
+  const byId = new Map<string, AnomalyResult[]>();
+
+  const payload = flagged.map((e) => ({
+    transaction_id: e.transactionId,
+    merchant: e.merchant,
+    amount_cents: e.amountCents,
+    amount_dollars: (Math.abs(e.amountCents) / 100).toFixed(2),
+    date: e.date,
+    is_recurring: e.isRecurring,
+    signals: {
+      duplicateLikely: e.duplicateLikely,
+      unusualAmountLikely: e.unusualAmountLikely,
+      subscriptionChangeLikely: e.subscriptionChangeLikely,
+      unusualMerchantLikely: e.unusualMerchantLikely,
+      unusualTimeStrongLikely: e.unusualTimeStrongLikely,
+    },
+  }));
+
+  const prompt = `You are an anomaly detection assistant for personal finance.
+For each transaction below, describe the anomalies its signals support.
+
+Only report an anomaly type when its corresponding signal is true:
+- duplicateLikely -> "duplicate"
+- unusualAmountLikely -> "unusual_amount"
+- subscriptionChangeLikely -> "subscription_change"
+- unusualMerchantLikely -> "unusual_merchant"
+- unusualTimeStrongLikely -> "unusual_time"
+
+A transaction may have several. Use concise, human-readable explanations.
+
+Transactions:
+${JSON.stringify(payload, null, 2)}
+
+Return ONLY a JSON array covering every anomaly across all transactions. Each element:
 {
   "transaction_id": string,
   "type": one of ["duplicate","unusual_amount","unusual_merchant","unusual_time","subscription_change"],
   "description": string,
   "severity": one of ["low","medium","high"]
 }
-Return an empty array [] if nothing looks anomalous.`;
+Return [] if nothing is worth reporting.`;
 
   const message = await anthropic.messages.create({
     model: "claude-sonnet-5",
-    max_tokens: 2000,
+    max_tokens: 4000,
     thinking: { type: "disabled" },
     messages: [{ role: "user", content: prompt }],
   });
@@ -282,96 +283,146 @@ Return an empty array [] if nothing looks anomalous.`;
   const textBlock = message.content.find((c) => c.type === "text") as
     | { type: "text"; text: string }
     | undefined;
-  const text = textBlock?.text ?? "";
+  const cleaned = (textBlock?.text ?? "")
+    .trim()
+    .replace(/```(?:json)?/g, "")
+    .replace(/```/g, "")
+    .trim();
 
-  const cleaned = text.trim().replace(/```(?:json)?/g, "").replace(/```/g, "").trim();
   const arrayJson = extractJsonArray(cleaned);
-  if (!arrayJson) return [];
+  if (!arrayJson) return byId;
 
   const parsed = JSON.parse(arrayJson) as unknown;
-  if (!Array.isArray(parsed)) return [];
+  if (!Array.isArray(parsed)) return byId;
 
-  const allowedTypes: AnomalyType[] = [
-    "duplicate",
-    "unusual_amount",
-    "unusual_merchant",
-    "unusual_time",
-    "subscription_change",
-  ];
+  const evidenceById = new Map(flagged.map((e) => [e.transactionId, e]));
 
-  const allowedSeverities: AnomalyResult["severity"][] = ["low", "medium", "high"];
+  for (const raw of parsed as unknown[]) {
+    if (!raw || typeof raw !== "object") continue;
+    const obj = raw as Record<string, unknown>;
 
-  const normalised: AnomalyResult[] = [];
-  for (const r of parsed as unknown[]) {
-    if (!r || typeof r !== "object") continue;
-    const obj = r as Record<string, unknown>;
+    const transactionId = String(obj.transaction_id ?? "");
     const type = String(obj.type ?? "");
     const severity = String(obj.severity ?? "");
     const description = String(obj.description ?? "");
-    const txId = String(obj.transaction_id ?? transactionId);
 
-    if (!allowedTypes.includes(type as AnomalyType)) continue;
-    if (!allowedSeverities.includes(severity as AnomalyResult["severity"])) continue;
+    const evidence = evidenceById.get(transactionId);
+    if (!evidence) continue;
+    if (!ALLOWED_TYPES.includes(type as AnomalyType)) continue;
+    if (!ALLOWED_SEVERITIES.includes(severity as AnomalyResult["severity"])) continue;
     if (!description) continue;
 
-    // Post-filter to reduce sensitivity:
-    // - "new merchant" (unusual_merchant) must be backed by unusual amount
-    //   and/or overseas context (we incorporate that into unusualMerchantLikely).
-    // - "unusual day-of-week" (unusual_time) must also be backed by the same strong evidence.
-    if (type === "unusual_merchant" && !unusualMerchantLikely) continue;
-    if (type === "unusual_time" && !unusualTimeStrongLikely) continue;
+    // The signals, not the model, decide. Anything unsupported is dropped.
+    if (type === "duplicate" && !evidence.duplicateLikely) continue;
+    if (type === "unusual_amount" && !evidence.unusualAmountLikely) continue;
+    if (type === "subscription_change" && !evidence.subscriptionChangeLikely) continue;
+    if (type === "unusual_merchant" && !evidence.unusualMerchantLikely) continue;
+    if (type === "unusual_time" && !evidence.unusualTimeStrongLikely) continue;
 
-    normalised.push({
-      transaction_id: txId,
+    const list = byId.get(transactionId) ?? [];
+    list.push({
+      transaction_id: transactionId,
       type: type as AnomalyType,
       description,
       severity: severity as AnomalyResult["severity"],
     });
+    byId.set(transactionId, list);
   }
 
-  return normalised;
+  return byId;
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index]);
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
+}
+
+/**
+ * Anomalies for a whole batch, keyed by transaction id.
+ *
+ * Costs at most one model call for the entire batch, and none at all when no
+ * transaction shows a signal — which is the common case. Previously this was one
+ * call per transaction regardless, the bulk of them asking the model to find
+ * anomalies in a transaction with no supporting evidence.
+ */
+export async function detectAnomaliesForBatch(
+  candidates: AnomalyCandidate[]
+): Promise<Map<string, AnomalyResult[]>> {
+  const byId = new Map<string, AnomalyResult[]>();
+  if (candidates.length === 0) return byId;
+
+  const supabase = createServiceClient();
+
+  const gathered = await mapWithConcurrency(candidates, EVIDENCE_CONCURRENCY, (candidate) =>
+    gatherEvidence(supabase, candidate).catch((error) => {
+      console.warn("anomaly evidence failed", {
+        transactionId: candidate.transactionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    })
+  );
+
+  const evidence = gathered.filter((e): e is AnomalyEvidence => e !== null);
+  const flagged = evidence.filter(hasAnySignal);
+
+  console.log("anomaly batch", {
+    candidates: candidates.length,
+    withSignal: flagged.length,
+    // One call for the batch, or none at all — previously one per transaction.
+    modelCalls: flagged.length > 0 ? 1 : 0,
+  });
+
+  // Heuristic descriptions are the baseline and the fallback.
+  for (const e of flagged) {
+    byId.set(e.transactionId, heuristicFromEvidence(e));
+  }
+
+  if (flagged.length === 0) return byId;
+
+  try {
+    if (!process.env.ANTHROPIC_API_KEY) return byId;
+
+    const described = await describeWithAi(flagged);
+    for (const [transactionId, anomalies] of described) {
+      // Keep the heuristic wording if the model returned nothing for this one.
+      if (anomalies.length > 0) byId.set(transactionId, anomalies);
+    }
+  } catch (error) {
+    console.warn("AI anomaly description failed; using heuristics", {
+      count: flagged.length,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return byId;
+}
+
+/** Single-transaction convenience wrapper around {@link detectAnomaliesForBatch}. */
 export async function detectAnomalies(
   transactionId: string,
   merchant: string | null,
   amountCents: number,
   date: string,
-  isRecurring: boolean,
+  isRecurring: boolean
 ): Promise<AnomalyResult[]> {
-  const supabase = createServiceClient();
-
-  // Keep current deterministic logic as a fallback.
-  const fallback = await detectAnomaliesHeuristic(
-    supabase,
-    transactionId,
-    merchant,
-    amountCents,
-    date,
-    isRecurring,
-  );
-
-  try {
-    // If Anthropic isn't configured, we can't do AI anomalies.
-    if (!process.env.ANTHROPIC_API_KEY) return fallback;
-
-    const aiAnomalies = await detectAnomaliesAi(
-      supabase,
-      transactionId,
-      merchant,
-      amountCents,
-      date,
-      isRecurring,
-    );
-
-    // If AI returns nothing, use fallback so anomalies still show up.
-    // (This prevents “nothing flagged” when AI is unavailable/failed.)
-    return aiAnomalies.length > 0 ? aiAnomalies : fallback;
-  } catch (error) {
-    console.warn("AI anomaly detection failed; using heuristics", {
-      transactionId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return fallback;
-  }
+  const byId = await detectAnomaliesForBatch([
+    { transactionId, merchant, amountCents, date, isRecurring },
+  ]);
+  return byId.get(transactionId) ?? [];
 }
