@@ -2,8 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { processPendingCategorisation } from "@/lib/categorise/process-pending";
 
-const DEFAULT_MAX_ROUNDS = 20;
-const HARD_MAX_ROUNDS = 100;
+/**
+ * How long a single request spends categorising before returning what is left.
+ *
+ * Deliberately well under the platform function timeout: an earlier version looped
+ * until the whole queue was done, which meant a large backlog always ran past the
+ * limit and was killed mid-write. The client comes back for the remainder instead.
+ */
+const DEFAULT_BUDGET_MS = 35_000;
+const MAX_BUDGET_MS = 50_000;
+const MIN_BUDGET_MS = 5_000;
 
 async function isAuthenticated(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -29,38 +37,33 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json().catch(() => ({} as { maxRounds?: number }));
-  const requestedRounds = Number(body?.maxRounds);
-  const maxRounds = Number.isFinite(requestedRounds)
-    ? Math.max(1, Math.min(HARD_MAX_ROUNDS, Math.floor(requestedRounds)))
-    : DEFAULT_MAX_ROUNDS;
+  const body = await request.json().catch(() => ({}) as { budgetMs?: number });
+  const requestedBudget = Number(body?.budgetMs);
+  const budgetMs = Number.isFinite(requestedBudget)
+    ? Math.max(MIN_BUDGET_MS, Math.min(MAX_BUDGET_MS, Math.floor(requestedBudget)))
+    : DEFAULT_BUDGET_MS;
 
-  let totalProcessed = 0;
-  let totalFailed = 0;
-  let rounds = 0;
+  try {
+    const result = await processPendingCategorisation({
+      deadline: Date.now() + budgetMs,
+    });
 
-  while (rounds < maxRounds) {
-    rounds += 1;
-    const result = await processPendingCategorisation();
-    totalProcessed += result.processed;
-    totalFailed += result.failed;
-
-    if (result.processed === 0 && result.failed === 0) {
-      return NextResponse.json({
-        status: "ok",
-        rounds,
-        processed: totalProcessed,
-        failed: totalFailed,
-        message: "No pending transactions",
-      });
-    }
+    return NextResponse.json({
+      status: "ok",
+      processed: result.processed,
+      failed: result.failed,
+      remaining: result.remaining,
+      // The caller should send another request to continue where this one stopped.
+      hasMore: result.remaining > 0,
+      stoppedReason: result.stopped_reason,
+      elapsedMs: result.elapsed_ms,
+      message: result.message,
+    });
+  } catch (error) {
+    console.error("categorise/run failed", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
   }
-
-  return NextResponse.json({
-    status: "partial",
-    rounds,
-    processed: totalProcessed,
-    failed: totalFailed,
-    message: `Stopped after ${maxRounds} rounds`,
-  });
 }

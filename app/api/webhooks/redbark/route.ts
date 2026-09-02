@@ -4,6 +4,13 @@ import type { RedbarkTransaction } from "@/lib/redbark/types";
 import { createServiceClient } from "@/lib/supabase/server";
 import { processPendingCategorisation } from "@/lib/categorise/process-pending";
 
+/**
+ * Categorisation budget for the post-response pass. Bounded because after() still
+ * runs inside the function's lifetime; whatever is left stays ai_status='pending'
+ * for the cron or a manual run.
+ */
+const POST_INGEST_CATEGORISE_BUDGET_MS = 30_000;
+
 type AccountRow = {
   id: string;
   redbark_name: string;
@@ -502,7 +509,9 @@ export async function POST(request: NextRequest) {
   if (result.insertedCount > 0 || result.updatedAttempted > 0) {
     after(async () => {
       try {
-        const categoriseResult = await processPendingCategorisation();
+        const categoriseResult = await processPendingCategorisation({
+          deadline: Date.now() + POST_INGEST_CATEGORISE_BUDGET_MS,
+        });
         console.log("redbark:webhook auto-categorise complete", {
           deliveryId,
           categoriseResult,
