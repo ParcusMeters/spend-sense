@@ -61,6 +61,33 @@ import { CategorisationStatus } from "@/components/dashboard/CategorisationStatu
  */
 const TREND_MONTHS = 24;
 
+/**
+ * PostgREST caps a response at 1000 rows and says nothing about having done so —
+ * a query over more than that silently returns a prefix. Both the trend window
+ * and the 180-day spend window are already past it, so they have to be paged.
+ */
+const PAGE_SIZE = 1000;
+
+async function fetchAllRows<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+  label: string
+): Promise<T[]> {
+  const rows: T[] = [];
+
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const { data, error } = await page(offset, offset + PAGE_SIZE - 1);
+    if (error) {
+      console.error(`dashboard: ${label} page fetch failed`, error);
+      break;
+    }
+    if (!data?.length) break;
+    rows.push(...data);
+    if (data.length < PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
 async function DashboardContent() {
   const supabase = createServiceClient();
   const { start: monthStart, end: monthEnd } = getCurrentMonth();
@@ -79,10 +106,10 @@ async function DashboardContent() {
     { data: monthTxns },
     { data: weekTxns },
     { data: allTxns },
-    { data: spendWindowTxns },
+    spendWindowTxns,
     { data: budgetRow },
     { data: recentTxns },
-    { data: trendPages },
+    trendPages,
   ] = await Promise.all([
     supabase.from("transactions").select("*").gte("date", monthStart).lte("date", monthEnd),
     supabase
@@ -99,26 +126,38 @@ async function DashboardContent() {
       )
       .gte("date", sixMonthStart)
       .lte("date", monthEnd),
-    supabase
-      .from("transactions")
-      .select(
-        "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow, is_recurring, description, merchant, merchant_canonical"
-      )
-      .gte("date", spendWindowStart)
-      .order("date", { ascending: false }),
+    fetchAllRows(
+      (from, to) =>
+        supabase
+          .from("transactions")
+          .select(
+            "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow, is_recurring, description, merchant, merchant_canonical"
+          )
+          .gte("date", spendWindowStart)
+          .order("date", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, to),
+      "spend window"
+    ),
     supabase.from("spending_budgets").select("weekly_limit_cents").limit(1).maybeSingle(),
     supabase
       .from("transactions")
       .select("*")
       .order("date", { ascending: false })
       .limit(20),
-    supabase
-      .from("transactions")
-      .select(
-        "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow"
-      )
-      .gte("date", trendStart)
-      .order("date", { ascending: true }),
+    fetchAllRows(
+      (from, to) =>
+        supabase
+          .from("transactions")
+          .select(
+            "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow"
+          )
+          .gte("date", trendStart)
+          .order("date", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      "monthly trend"
+    ),
   ]);
 
   const txns = monthTxns ?? [];
@@ -190,7 +229,7 @@ async function DashboardContent() {
   // Monthly trend. Bounded to TREND_MONTHS rather than walking the whole table:
   // this set is also serialised to the client for the daily chart, so an unbounded
   // history would make both the query and the payload grow forever.
-  const trendTxns = (trendPages ?? []) as {
+  const trendTxns = trendPages as {
     date: string;
     direction: string;
     amount_cents: number;
