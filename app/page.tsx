@@ -13,6 +13,7 @@ import { TrendAndDailySection } from "@/components/dashboard/TrendAndDailySectio
 import { WeeklySummary } from "@/components/dashboard/WeeklySummary";
 import { TopMerchants } from "@/components/dashboard/TopMerchants";
 import { Subscriptions } from "@/components/dashboard/Subscriptions";
+import { CategoryTrends } from "@/components/dashboard/CategoryTrends";
 import {
   getCategoryColor,
   isExcludedFromTotals,
@@ -39,6 +40,7 @@ import {
   buildSubscriptionSummary,
   type SubscriptionTxnLite,
 } from "@/lib/dashboard/subscriptions";
+import { buildCategoryTrends } from "@/lib/dashboard/category-trends";
 import { RunCategoriseButton } from "@/components/dashboard/RunCategoriseButton";
 import { CategorisationStatus } from "@/components/dashboard/CategorisationStatus";
 
@@ -208,6 +210,8 @@ async function DashboardContent() {
     value,
     color: getCategoryColor(name),
   }));
+
+  const categoryTrends = buildCategoryTrends(trendTxns, { months: 6, limit: 9 });
 
   const { data: dailySpendingData, categories: dailyCategories } =
     buildDailySpendingChartData(trendTxns, {
@@ -392,6 +396,8 @@ async function DashboardContent() {
         <WeeklySummary summary={weeklySummary} />
         <TopMerchants leaderboard={merchantLeaderboard} />
       </div>
+
+      <CategoryTrends result={categoryTrends} />
 
       <TrendAndDailySection
         monthlyTrendData={monthlyTrendData}
