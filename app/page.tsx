@@ -25,9 +25,17 @@ import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { SavingsProjection } from "@/components/dashboard/SavingsProjection";
 import { DashboardRealtime } from "@/components/dashboard/DashboardRealtime";
 import { AuthGate } from "@/components/auth/AuthGate";
-import { format, addMonths, startOfMonth, subDays, getDay, getDate, getDaysInMonth } from "date-fns";
 import {
-  fetchRedbarkTotalBalanceCents,
+  format,
+  addMonths,
+  startOfMonth,
+  subDays,
+  subMonths,
+  getDay,
+  getDate,
+  getDaysInMonth,
+} from "date-fns";
+import {
   syncRedbarkBalancesToDatabase,
 } from "@/lib/redbark/sync-balances";
 import { SpendingGoalTracker } from "@/components/dashboard/SpendingGoalTracker";
@@ -47,18 +55,71 @@ import { buildInvestmentFlow } from "@/lib/dashboard/investment-flow";
 import { RunCategoriseButton } from "@/components/dashboard/RunCategoriseButton";
 import { CategorisationStatus } from "@/components/dashboard/CategorisationStatus";
 
+/**
+ * How much history the trend chart and the client-side month drill-down cover.
+ * Two years keeps the query and the serialised payload bounded as the table grows.
+ */
+const TREND_MONTHS = 24;
+
 async function DashboardContent() {
   const supabase = createServiceClient();
-  await syncRedbarkBalancesToDatabase(supabase);
   const { start: monthStart, end: monthEnd } = getCurrentMonth();
   const { start: sixMonthStart } = getLastNMonths(6);
+  const { start: weekStart, end: weekEnd } = getCurrentWeek();
 
-  // Fetch current month transactions
-  const { data: monthTxns } = await supabase
-    .from("transactions")
-    .select("*")
-    .gte("date", monthStart)
-    .lte("date", monthEnd);
+  // The balance sync calls the Redbark API, and the reads below do not depend on
+  // it, so it runs alongside them rather than in front of them. Balances are read
+  // afterwards, so they still reflect this sync.
+  const balancesSynced = syncRedbarkBalancesToDatabase(supabase);
+
+  const spendWindowStart = format(subDays(new Date(), 179), "yyyy-MM-dd");
+  const trendStart = format(subMonths(startOfMonth(new Date()), TREND_MONTHS - 1), "yyyy-MM-dd");
+
+  const [
+    { data: monthTxns },
+    { data: weekTxns },
+    { data: allTxns },
+    { data: spendWindowTxns },
+    { data: budgetRow },
+    { data: recentTxns },
+    { data: trendPages },
+  ] = await Promise.all([
+    supabase.from("transactions").select("*").gte("date", monthStart).lte("date", monthEnd),
+    supabase
+      .from("transactions")
+      .select(
+        "amount_cents, direction, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow"
+      )
+      .gte("date", weekStart)
+      .lte("date", weekEnd),
+    supabase
+      .from("transactions")
+      .select(
+        "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow"
+      )
+      .gte("date", sixMonthStart)
+      .lte("date", monthEnd),
+    supabase
+      .from("transactions")
+      .select(
+        "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow, is_recurring, description, merchant, merchant_canonical"
+      )
+      .gte("date", spendWindowStart)
+      .order("date", { ascending: false }),
+    supabase.from("spending_budgets").select("weekly_limit_cents").limit(1).maybeSingle(),
+    supabase
+      .from("transactions")
+      .select("*")
+      .order("date", { ascending: false })
+      .limit(20),
+    supabase
+      .from("transactions")
+      .select(
+        "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow"
+      )
+      .gte("date", trendStart)
+      .order("date", { ascending: true }),
+  ]);
 
   const txns = monthTxns ?? [];
   const effectiveCategory = (t: {
@@ -92,16 +153,6 @@ async function DashboardContent() {
 
   const spendingThisMonth = grossSpendingThisMonth - reimbursementsThisMonth;
 
-  // Weekly spending for spending goal tracker
-  const { start: weekStart, end: weekEnd } = getCurrentWeek();
-  const { data: weekTxns } = await supabase
-    .from("transactions")
-    .select(
-      "amount_cents, direction, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow"
-    )
-    .gte("date", weekStart)
-    .lte("date", weekEnd);
-
   const grossWeeklySpending = (weekTxns ?? [])
     .filter((t) => t.direction === "debit" && !isExcludedFromTotals(t))
     .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
@@ -124,51 +175,22 @@ async function DashboardContent() {
   const daysIntoMonth = getDate(today);
   const daysInMonth = getDaysInMonth(today);
 
-  // Fetch account balances (prefer live Redbark total, fallback to local snapshot)
-  const liveTotalBalance = await fetchRedbarkTotalBalanceCents();
+  // Balances come from the table once the sync above has written them, rather
+  // than from a second call to the same Redbark endpoints.
+  await balancesSynced;
   const { data: accounts } = await supabase.from("accounts").select("balance");
-  const fallbackTotalBalance = (accounts ?? []).reduce(
+  const totalBalance = (accounts ?? []).reduce(
     (sum, a) => sum + Number(a.balance) * 100,
     0
   );
-  const totalBalance = liveTotalBalance ?? fallbackTotalBalance;
 
   // Spending by category (last 6 months) - computed from `allTxns` below.
   let spendingByCategory: { name: string; value: number; color: string }[] = [];
 
-  // Monthly trend (last 6 months)
-  const { data: allTxns } = await supabase
-    .from("transactions")
-    .select(
-      "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow"
-    )
-    .gte("date", sixMonthStart)
-    .lte("date", monthEnd);
-
-  // Monthly trend: full history (paginated — Supabase caps at 1000 rows per request)
-  const TREND_PAGE = 1000;
-  const { data: firstTxn } = await supabase
-    .from("transactions")
-    .select("date")
-    .order("date", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  const { data: lastTxn } = await supabase
-    .from("transactions")
-    .select("date")
-    .order("date", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const firstMonthKey = transactionMonthKey(firstTxn?.date ?? null);
-  const lastMonthKey = transactionMonthKey(lastTxn?.date ?? null);
-
-  const monthKeys =
-    firstMonthKey && lastMonthKey
-      ? monthKeysBetweenInclusive(firstMonthKey, lastMonthKey)
-      : [];
-
-  const trendTxns: {
+  // Monthly trend. Bounded to TREND_MONTHS rather than walking the whole table:
+  // this set is also serialised to the client for the daily chart, so an unbounded
+  // history would make both the query and the payload grow forever.
+  const trendTxns = (trendPages ?? []) as {
     date: string;
     direction: string;
     amount_cents: number;
@@ -177,33 +199,21 @@ async function DashboardContent() {
     user_category_override: string | null;
     is_internal_transfer: boolean | null;
     is_investment_flow: boolean | null;
-  }[] = [];
+  }[];
 
-  if (firstTxn?.date && lastTxn?.date && monthKeys.length > 0) {
-    for (let offset = 0; ; offset += TREND_PAGE) {
-      const { data: page, error: trendPageError } = await supabase
-        .from("transactions")
-        .select(
-          "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow"
-        )
-        .gte("date", firstTxn.date)
-        .lte("date", lastTxn.date)
-        .order("date", { ascending: true })
-        .order("id", { ascending: true })
-        .range(offset, offset + TREND_PAGE - 1);
+  const firstMonthKey = transactionMonthKey(trendTxns[0]?.date ?? null);
+  const lastMonthKey = transactionMonthKey(
+    trendTxns[trendTxns.length - 1]?.date ?? null
+  );
 
-      if (trendPageError) {
-        console.error("dashboard: monthly trend page fetch failed", trendPageError);
-        break;
-      }
-      if (!page?.length) break;
-      trendTxns.push(...page);
-      if (page.length < TREND_PAGE) break;
-    }
-  }
+  const monthKeys =
+    firstMonthKey && lastMonthKey
+      ? monthKeysBetweenInclusive(firstMonthKey, lastMonthKey)
+      : [];
 
   const categoryMap: Record<string, number> = {};
-  for (const t of allTxns ?? []) {
+  for (const t of trendTxns) {
+    if (t.date < sixMonthStart || t.date > monthEnd) continue;
     if (t.direction !== "debit") continue;
     const cat = effectiveCategory(t);
     if (isExcludedFromTotals(t)) continue;
@@ -225,18 +235,6 @@ async function DashboardContent() {
       kind: "rolling",
       days: 35,
     });
-
-  // One window covering both the 7-day summary and the 90-day merchant leaderboard,
-  // each of which needs its own comparison period. Selects description/merchant,
-  // which the trend query does not.
-  const spendWindowStart = format(subDays(new Date(), 179), "yyyy-MM-dd");
-  const { data: spendWindowTxns } = await supabase
-    .from("transactions")
-    .select(
-      "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow, is_recurring, description, merchant, merchant_canonical"
-    )
-    .gte("date", spendWindowStart)
-    .order("date", { ascending: false });
 
   const weeklySummary = buildWeeklySummary((spendWindowTxns ?? []) as WeekTxnLite[]);
   const merchantLeaderboard = buildMerchantLeaderboard(
@@ -350,22 +348,9 @@ async function DashboardContent() {
     };
   });
 
-  // Spending budget for chart reference lines
-  const { data: budgetRow } = await supabase
-    .from("spending_budgets")
-    .select("weekly_limit_cents")
-    .limit(1)
-    .maybeSingle();
   const weeklyBudgetCents = budgetRow?.weekly_limit_cents ?? null;
   const monthlyBudgetCents = weeklyBudgetCents ? Math.round(weeklyBudgetCents * 4.33) : null;
   const dailyBudgetCents = weeklyBudgetCents ? Math.round(weeklyBudgetCents / 7) : null;
-
-  // Recent transactions
-  const { data: recentTxns } = await supabase
-    .from("transactions")
-    .select("*")
-    .order("date", { ascending: false })
-    .limit(20);
 
   return (
     <div className="space-y-6">
