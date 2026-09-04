@@ -3,12 +3,59 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowDownLeft, ArrowUpRight, DollarSign, PiggyBank } from "lucide-react";
 import { formatCurrency } from "@/lib/utils/currency";
+import type { MonthPace, PaceFigure } from "@/lib/dashboard/month-pace";
 
 interface BalanceCardsProps {
   totalBalance: number;
   incomeThisMonth: number;
   spendingThisMonth: number;
   netSaved: number;
+  /** This month so far against the same stretch of previous months. */
+  pace?: MonthPace;
+}
+
+/**
+ * For spending, above the usual pace is bad; for income and savings it is good.
+ * Without that the same colour would mean opposite things on adjacent cards.
+ */
+function PaceLine({
+  figure,
+  dayOfMonth,
+  higherIsBetter,
+}: {
+  figure: PaceFigure;
+  dayOfMonth: number;
+  higherIsBetter: boolean;
+}) {
+  const { delta, deltaPct, typical } = figure;
+  const by = `by day ${dayOfMonth}`;
+
+  if (typical === 0) {
+    return (
+      <p className="mt-1 text-xs text-muted-foreground">no comparable history yet</p>
+    );
+  }
+
+  const good = higherIsBetter ? delta > 0 : delta < 0;
+  const tone =
+    delta === 0
+      ? "text-muted-foreground"
+      : good
+        ? "text-emerald-600 dark:text-emerald-400"
+        : "text-red-600 dark:text-red-400";
+
+  return (
+    <p className="mt-1 text-xs">
+      <span className={tone}>
+        {delta === 0
+          ? "on pace"
+          : `${deltaPct === null ? "" : `${Math.abs(deltaPct)}% `}${
+              delta > 0 ? "above" : "below"
+            } usual`}
+      </span>
+      <span className="text-muted-foreground"> · typically {formatCurrency(typical)} {by}</span>
+    </p>
+  );
 }
 
 export function BalanceCards({
@@ -16,6 +63,7 @@ export function BalanceCards({
   incomeThisMonth,
   spendingThisMonth,
   netSaved,
+  pace,
 }: BalanceCardsProps) {
   const cards = [
     {
@@ -28,6 +76,8 @@ export function BalanceCards({
     {
       title: "Income This Month",
       value: formatCurrency(incomeThisMonth),
+      pace: pace?.income,
+      higherIsBetter: true,
       icon: ArrowDownLeft,
       color: "text-blue-600 dark:text-blue-400",
       bg: "bg-blue-50 dark:bg-blue-950",
@@ -35,6 +85,8 @@ export function BalanceCards({
     {
       title: "Spending This Month",
       value: formatCurrency(spendingThisMonth),
+      pace: pace?.spending,
+      higherIsBetter: false,
       icon: ArrowUpRight,
       color: "text-rose-600 dark:text-rose-400",
       bg: "bg-rose-50 dark:bg-rose-950",
@@ -42,6 +94,8 @@ export function BalanceCards({
     {
       title: "Net Saved",
       value: formatCurrency(netSaved),
+      pace: pace?.netSaved,
+      higherIsBetter: true,
       icon: PiggyBank,
       color: netSaved >= 0
         ? "text-emerald-600 dark:text-emerald-400"
@@ -66,6 +120,13 @@ export function BalanceCards({
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">{card.value}</p>
+            {card.pace && pace && (
+              <PaceLine
+                figure={card.pace}
+                dayOfMonth={pace.dayOfMonth}
+                higherIsBetter={card.higherIsBetter ?? true}
+              />
+            )}
           </CardContent>
         </Card>
       ))}

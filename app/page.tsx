@@ -41,6 +41,7 @@ import {
   type SubscriptionTxnLite,
 } from "@/lib/dashboard/subscriptions";
 import { buildCategoryTrends } from "@/lib/dashboard/category-trends";
+import { buildMonthPace } from "@/lib/dashboard/month-pace";
 import { RunCategoriseButton } from "@/components/dashboard/RunCategoriseButton";
 import { CategorisationStatus } from "@/components/dashboard/CategorisationStatus";
 
@@ -212,6 +213,7 @@ async function DashboardContent() {
   }));
 
   const categoryTrends = buildCategoryTrends(trendTxns, { months: 6, limit: 9 });
+  const monthPace = buildMonthPace(trendTxns, { months: 3 });
 
   const { data: dailySpendingData, categories: dailyCategories } =
     buildDailySpendingChartData(trendTxns, {
@@ -379,6 +381,7 @@ async function DashboardContent() {
         incomeThisMonth={incomeThisMonth}
         spendingThisMonth={spendingThisMonth}
         netSaved={incomeThisMonth - spendingThisMonth}
+        pace={monthPace}
       />
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
