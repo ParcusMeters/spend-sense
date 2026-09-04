@@ -80,6 +80,13 @@ export async function processPendingCategorisation(
     console.error("categorise-pending: refresh_internal_transfers failed", transferError);
   }
 
+  // Flag broker settlements so buys and sells net out rather than counting as
+  // spending and income.
+  const { error: investError } = await supabase.rpc("refresh_investment_flows");
+  if (investError) {
+    console.error("categorise-pending: refresh_investment_flows failed", investError);
+  }
+
   // Regroup merchant name variants so per-merchant totals stay whole.
   const { error: merchantError } = await supabase.rpc("refresh_merchant_canonical");
   if (merchantError) {

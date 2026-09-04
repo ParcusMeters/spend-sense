@@ -12,6 +12,8 @@ interface BalanceCardsProps {
   netSaved: number;
   /** This month so far against the same stretch of previous months. */
   pace?: MonthPace;
+  /** Buys net of sells this month; neither spending nor income. */
+  investedThisMonth?: number;
 }
 
 /**
@@ -64,6 +66,7 @@ export function BalanceCards({
   spendingThisMonth,
   netSaved,
   pace,
+  investedThisMonth,
 }: BalanceCardsProps) {
   const cards = [
     {
@@ -96,6 +99,14 @@ export function BalanceCards({
       value: formatCurrency(netSaved),
       pace: pace?.netSaved,
       higherIsBetter: true,
+      // Investing is neither spending nor income, so the money is still "saved";
+      // this says how much of it has been moved into the market.
+      note:
+        investedThisMonth && investedThisMonth !== 0
+          ? `${formatCurrency(Math.abs(investedThisMonth))} ${
+              investedThisMonth > 0 ? "moved into" : "returned from"
+            } investments`
+          : undefined,
       icon: PiggyBank,
       color: netSaved >= 0
         ? "text-emerald-600 dark:text-emerald-400"
@@ -126,6 +137,9 @@ export function BalanceCards({
                 dayOfMonth={pace.dayOfMonth}
                 higherIsBetter={card.higherIsBetter ?? true}
               />
+            )}
+            {card.note && (
+              <p className="mt-1 text-xs text-muted-foreground">{card.note}</p>
             )}
           </CardContent>
         </Card>

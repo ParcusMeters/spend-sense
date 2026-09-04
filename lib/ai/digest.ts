@@ -74,7 +74,9 @@ export async function generateDigest(
     };
   }
 
-  const spendable = transactions.filter((t) => !t.is_internal_transfer);
+  const spendable = transactions.filter(
+    (t) => !t.is_internal_transfer && !t.is_investment_flow
+  );
   const debits = spendable.filter((t) => t.direction === "debit");
   const credits = spendable.filter((t) => t.direction === "credit");
   const grossSpending = debits.reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);

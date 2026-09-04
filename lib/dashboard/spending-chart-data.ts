@@ -61,6 +61,8 @@ export type TrendTxnLite = {
   user_category_override: string | null;
   /** Set by refresh_internal_transfers(): a move between the user's own accounts. */
   is_internal_transfer?: boolean | null;
+  /** Set by refresh_investment_flows(): a buy or sell settled with a broker. */
+  is_investment_flow?: boolean | null;
 };
 
 /**
@@ -73,11 +75,15 @@ export type TrendTxnLite = {
  */
 export function isExcludedFromTotals(t: {
   is_internal_transfer?: boolean | null;
+  is_investment_flow?: boolean | null;
   user_category_override?: string | null;
   ai_category?: string | null;
   redbark_category?: string | null;
 }): boolean {
   if (t.is_internal_transfer) return true;
+  // Buying shares converts money rather than consuming it, and selling returns
+  // it. Netted separately by buildInvestmentFlow rather than counted here.
+  if (t.is_investment_flow) return true;
   const cat = t.user_category_override ?? t.ai_category ?? t.redbark_category ?? "Other";
   return isTransferCategory(cat);
 }

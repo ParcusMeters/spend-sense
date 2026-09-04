@@ -42,6 +42,7 @@ import {
 } from "@/lib/dashboard/subscriptions";
 import { buildCategoryTrends } from "@/lib/dashboard/category-trends";
 import { buildMonthPace } from "@/lib/dashboard/month-pace";
+import { buildInvestmentFlow } from "@/lib/dashboard/investment-flow";
 import { RunCategoriseButton } from "@/components/dashboard/RunCategoriseButton";
 import { CategorisationStatus } from "@/components/dashboard/CategorisationStatus";
 
@@ -70,6 +71,7 @@ async function DashboardContent() {
       (t) =>
         t.direction === "credit" &&
         !t.is_internal_transfer &&
+        !t.is_investment_flow &&
         effectiveCategory(t) === "Salary"
     )
     .reduce((sum, t) => sum + t.amount_cents, 0);
@@ -94,7 +96,7 @@ async function DashboardContent() {
   const { data: weekTxns } = await supabase
     .from("transactions")
     .select(
-      "amount_cents, direction, ai_category, redbark_category, user_category_override, is_internal_transfer"
+      "amount_cents, direction, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow"
     )
     .gte("date", weekStart)
     .lte("date", weekEnd);
@@ -137,7 +139,7 @@ async function DashboardContent() {
   const { data: allTxns } = await supabase
     .from("transactions")
     .select(
-      "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer"
+      "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow"
     )
     .gte("date", sixMonthStart)
     .lte("date", monthEnd);
@@ -173,6 +175,7 @@ async function DashboardContent() {
     redbark_category: string | null;
     user_category_override: string | null;
     is_internal_transfer: boolean | null;
+    is_investment_flow: boolean | null;
   }[] = [];
 
   if (firstTxn?.date && lastTxn?.date && monthKeys.length > 0) {
@@ -180,7 +183,7 @@ async function DashboardContent() {
       const { data: page, error: trendPageError } = await supabase
         .from("transactions")
         .select(
-          "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer"
+          "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow"
         )
         .gte("date", firstTxn.date)
         .lte("date", lastTxn.date)
@@ -214,6 +217,7 @@ async function DashboardContent() {
 
   const categoryTrends = buildCategoryTrends(trendTxns, { months: 6, limit: 9 });
   const monthPace = buildMonthPace(trendTxns, { months: 3 });
+  const investmentFlow = buildInvestmentFlow(trendTxns, { months: 6 });
 
   const { data: dailySpendingData, categories: dailyCategories } =
     buildDailySpendingChartData(trendTxns, {
@@ -228,7 +232,7 @@ async function DashboardContent() {
   const { data: spendWindowTxns } = await supabase
     .from("transactions")
     .select(
-      "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_recurring, description, merchant, merchant_canonical"
+      "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_investment_flow, is_recurring, description, merchant, merchant_canonical"
     )
     .gte("date", spendWindowStart)
     .order("date", { ascending: false });
@@ -254,7 +258,7 @@ async function DashboardContent() {
     const cat = effectiveCategory(t);
     if (isExcludedFromTotals(t)) continue;
 
-    if (t.direction === "credit" && cat === "Salary") {
+    if (t.direction === "credit" && !t.is_investment_flow && cat === "Salary") {
       monthIncomeMap[monthKey] = (monthIncomeMap[monthKey] ?? 0) + t.amount_cents;
     } else if (t.direction === "credit" && isReimbursementCategory(cat)) {
       // Reimbursements reduce the spending total — show as negative spending
@@ -308,7 +312,7 @@ async function DashboardContent() {
     if (!monthlyData[m]) monthlyData[m] = { income: 0, spending: 0 };
     const cat = effectiveCategory(t);
     if (isExcludedFromTotals(t)) continue;
-    if (t.direction === "credit" && cat === "Salary") {
+    if (t.direction === "credit" && !t.is_investment_flow && cat === "Salary") {
       monthlyData[m].income += t.amount_cents;
     } else if (t.direction === "credit" && isReimbursementCategory(cat)) {
       monthlyData[m].spending -= t.amount_cents;
@@ -382,6 +386,7 @@ async function DashboardContent() {
         spendingThisMonth={spendingThisMonth}
         netSaved={incomeThisMonth - spendingThisMonth}
         pace={monthPace}
+        investedThisMonth={investmentFlow.monthToDate.net}
       />
 
       {/* Spending over time first: the shape of the habit is the thing being

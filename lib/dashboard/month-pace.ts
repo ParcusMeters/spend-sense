@@ -73,6 +73,8 @@ export function buildMonthPace(
       spendByMonth.set(monthKey, (spendByMonth.get(monthKey) ?? 0) + Math.abs(t.amount_cents));
     } else if (t.direction === "credit") {
       if (t.is_internal_transfer) continue;
+      // A sale settlement is not wages, whatever the categoriser called it.
+      if (t.is_investment_flow) continue;
       if (effectiveCategory(t) !== "Salary") continue;
       incomeByMonth.set(monthKey, (incomeByMonth.get(monthKey) ?? 0) + t.amount_cents);
     }
