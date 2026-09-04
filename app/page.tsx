@@ -11,6 +11,7 @@ import {
 import { BalanceCards } from "@/components/dashboard/BalanceCards";
 import { TrendAndDailySection } from "@/components/dashboard/TrendAndDailySection";
 import { WeeklySummary } from "@/components/dashboard/WeeklySummary";
+import { TopMerchants } from "@/components/dashboard/TopMerchants";
 import {
   getCategoryColor,
   isExcludedFromTotals,
@@ -32,6 +33,10 @@ import {
 import { SpendingGoalTracker } from "@/components/dashboard/SpendingGoalTracker";
 import { getCurrentWeek } from "@/lib/utils/dates";
 import { buildWeeklySummary, type WeekTxnLite } from "@/lib/dashboard/weekly-summary";
+import {
+  buildMerchantLeaderboard,
+  type MerchantTxnLite,
+} from "@/lib/dashboard/merchant-summary";
 import { RunCategoriseButton } from "@/components/dashboard/RunCategoriseButton";
 import { CategorisationStatus } from "@/components/dashboard/CategorisationStatus";
 
@@ -214,18 +219,23 @@ async function DashboardContent() {
       days: 35,
     });
 
-  // Last 7 days plus the 7 before it, for the week-on-week comparison. Needs
-  // description/merchant, which the trend query does not select.
-  const fortnightStart = format(subDays(new Date(), 13), "yyyy-MM-dd");
-  const { data: fortnightTxns } = await supabase
+  // One window covering both the 7-day summary and the 90-day merchant leaderboard,
+  // each of which needs its own comparison period. Selects description/merchant,
+  // which the trend query does not.
+  const spendWindowStart = format(subDays(new Date(), 179), "yyyy-MM-dd");
+  const { data: spendWindowTxns } = await supabase
     .from("transactions")
     .select(
-      "date, direction, amount_cents, ai_category, redbark_category, user_category_override, description, merchant"
+      "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, description, merchant, merchant_canonical"
     )
-    .gte("date", fortnightStart)
+    .gte("date", spendWindowStart)
     .order("date", { ascending: false });
 
-  const weeklySummary = buildWeeklySummary((fortnightTxns ?? []) as WeekTxnLite[]);
+  const weeklySummary = buildWeeklySummary((spendWindowTxns ?? []) as WeekTxnLite[]);
+  const merchantLeaderboard = buildMerchantLeaderboard(
+    (spendWindowTxns ?? []) as MerchantTxnLite[],
+    { days: 90, limit: 10 }
+  );
 
   const monthIncomeMap: Record<string, number> = {};
   const monthSpendMap: Record<string, Record<string, number>> = {};
@@ -395,7 +405,10 @@ async function DashboardContent() {
         </Card>
       </div>
 
-      <WeeklySummary summary={weeklySummary} />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <WeeklySummary summary={weeklySummary} />
+        <TopMerchants leaderboard={merchantLeaderboard} />
+      </div>
 
       <TrendAndDailySection
         monthlyTrendData={monthlyTrendData}

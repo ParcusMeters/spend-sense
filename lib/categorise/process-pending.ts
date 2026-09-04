@@ -80,6 +80,12 @@ export async function processPendingCategorisation(
     console.error("categorise-pending: refresh_internal_transfers failed", transferError);
   }
 
+  // Regroup merchant name variants so per-merchant totals stay whole.
+  const { error: merchantError } = await supabase.rpc("refresh_merchant_canonical");
+  if (merchantError) {
+    console.error("categorise-pending: refresh_merchant_canonical failed", merchantError);
+  }
+
   // Reclaim rows abandoned by a previous run before deciding what is outstanding.
   const staleBefore = new Date(startedAt - STALE_PROCESSING_MS).toISOString();
   const { data: recovered, error: recoverError } = await supabase
