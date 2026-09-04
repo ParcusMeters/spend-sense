@@ -17,6 +17,7 @@ import { CategoryTrends } from "@/components/dashboard/CategoryTrends";
 import {
   getCategoryColor,
   isExcludedFromTotals,
+  isIncomeCategory,
   isReimbursementCategory,
   buildDailySpendingChartData,
 } from "@/lib/dashboard/spending-chart-data";
@@ -72,7 +73,7 @@ async function DashboardContent() {
         t.direction === "credit" &&
         !t.is_internal_transfer &&
         !t.is_investment_flow &&
-        effectiveCategory(t) === "Salary"
+        isIncomeCategory(effectiveCategory(t))
     )
     .reduce((sum, t) => sum + t.amount_cents, 0);
 
@@ -258,7 +259,7 @@ async function DashboardContent() {
     const cat = effectiveCategory(t);
     if (isExcludedFromTotals(t)) continue;
 
-    if (t.direction === "credit" && !t.is_investment_flow && cat === "Salary") {
+    if (t.direction === "credit" && !t.is_investment_flow && isIncomeCategory(cat)) {
       monthIncomeMap[monthKey] = (monthIncomeMap[monthKey] ?? 0) + t.amount_cents;
     } else if (t.direction === "credit" && isReimbursementCategory(cat)) {
       // Reimbursements reduce the spending total — show as negative spending
@@ -312,7 +313,7 @@ async function DashboardContent() {
     if (!monthlyData[m]) monthlyData[m] = { income: 0, spending: 0 };
     const cat = effectiveCategory(t);
     if (isExcludedFromTotals(t)) continue;
-    if (t.direction === "credit" && !t.is_investment_flow && cat === "Salary") {
+    if (t.direction === "credit" && !t.is_investment_flow && isIncomeCategory(cat)) {
       monthlyData[m].income += t.amount_cents;
     } else if (t.direction === "credit" && isReimbursementCategory(cat)) {
       monthlyData[m].spending -= t.amount_cents;

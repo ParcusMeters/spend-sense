@@ -31,6 +31,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
   Travel: "#5DCAA5",
   "Bank fees": "#B4B2A9",
   Investing: "#1D9E75",
+  "Investment income": "#0FA3B1",
   Reimbursements: "#60C9DB",
   Other: "#888780",
 };
@@ -39,6 +40,17 @@ export function isTransferCategory(category: string | null | undefined): boolean
   if (!category) return false;
   const value = category.toLowerCase();
   return value.includes("transfer") || value.includes("xfer");
+}
+
+/**
+ * Categories that represent money genuinely earned.
+ *
+ * Sale proceeds are deliberately absent: they return capital that was already
+ * yours, and are excluded upstream by is_investment_flow. Dividends and interest
+ * are earnings and do belong here.
+ */
+export function isIncomeCategory(category: string | null | undefined): boolean {
+  return category === "Salary" || category === "Investment income";
 }
 
 export function isReimbursementCategory(category: string | null | undefined): boolean {

@@ -14,6 +14,7 @@ import type { Transaction } from "@/lib/supabase/types";
 const CATEGORIES = [
   "All",
   "Salary",
+  "Investment income",
   "Groceries",
   "Eating out",
   "Drinks & nightlife",

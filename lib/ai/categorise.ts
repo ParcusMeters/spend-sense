@@ -4,6 +4,7 @@ const anthropic = new Anthropic();
 
 const CATEGORIES = [
   "Salary",
+  "Investment income",
   "Groceries",
   "Eating out",
   "Drinks & nightlife",
@@ -77,6 +78,11 @@ Salary vs Transfers (important):
 - "Salary" is ONLY for income paid by an employer or external party (wages, salary, freelance payments, government benefits). The description usually contains a company/business name and keywords like "payroll", "salary", "wages", or a recognisable employer name.
 - "Transfers" is for money moving between the user's OWN accounts (e.g. savings ↔ everyday, Revolut top-ups, moving money between banks). Look for generic descriptions like "Transfer", "Direct Credit", account numbers, or the user's own name.
 - When a credit transaction is ambiguous and could be either, prefer "Transfers" over "Salary". Only use "Salary" when you are reasonably confident it is external income.
+
+Investment income:
+- "Investment income" is money earned from investments: dividends, distributions, and interest credited by a bank ("Credit Interest", "Interest").
+- It is NOT the proceeds of selling shares. A sale settlement returns capital that was already yours — descriptions naming a broker such as "COMMSEC" or "COMMONWEALTH SEC" are "Investing", never "Investment income" or "Salary".
+- "Debit Excess Interest" is a charge, not earnings: that belongs in "Bank fees".
 
 Rent and bills (important):
 - "Rent" is rent paid out to a landlord, real estate agent or housemate, including when it is sent as a bank transfer or PayID payment to that person. Where the payee is external, "Rent" beats "Transfers" even though the transaction is a transfer.

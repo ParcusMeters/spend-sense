@@ -1,5 +1,9 @@
 import { getDate, startOfMonth, subMonths, format } from "date-fns";
-import { isExcludedFromTotals, type TrendTxnLite } from "./spending-chart-data";
+import {
+  isExcludedFromTotals,
+  isIncomeCategory,
+  type TrendTxnLite,
+} from "./spending-chart-data";
 
 export type PaceFigure = {
   toDate: number;
@@ -75,7 +79,7 @@ export function buildMonthPace(
       if (t.is_internal_transfer) continue;
       // A sale settlement is not wages, whatever the categoriser called it.
       if (t.is_investment_flow) continue;
-      if (effectiveCategory(t) !== "Salary") continue;
+      if (!isIncomeCategory(effectiveCategory(t))) continue;
       incomeByMonth.set(monthKey, (incomeByMonth.get(monthKey) ?? 0) + t.amount_cents);
     }
   }

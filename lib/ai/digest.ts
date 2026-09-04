@@ -85,7 +85,7 @@ export async function generateDigest(
     .reduce((sum, t) => sum + t.amount_cents, 0);
   const totalSpending = grossSpending - reimbursements;
   const totalIncome = credits
-    .filter((t) => t.ai_category === "Salary")
+    .filter((t) => t.ai_category === "Salary" || t.ai_category === "Investment income")
     .reduce((sum, t) => sum + t.amount_cents, 0);
 
   const categoryTotals: Record<string, number> = {};

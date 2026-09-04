@@ -25,7 +25,7 @@ async function ProjectionsContent() {
     if (t.is_internal_transfer) continue;
     const cat = t.user_category_override ?? t.ai_category ?? t.redbark_category;
     if (cat === "Transfers") continue;
-    if (t.direction === "credit" && !t.is_investment_flow && cat === "Salary") {
+    if (t.direction === "credit" && !t.is_investment_flow && (cat === "Salary" || cat === "Investment income")) {
       monthlyData[m].income += t.amount_cents;
     } else if (t.direction === "credit" && cat === "Reimbursements") {
       monthlyData[m].spending -= t.amount_cents;
