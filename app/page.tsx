@@ -12,6 +12,7 @@ import { BalanceCards } from "@/components/dashboard/BalanceCards";
 import { TrendAndDailySection } from "@/components/dashboard/TrendAndDailySection";
 import { WeeklySummary } from "@/components/dashboard/WeeklySummary";
 import { TopMerchants } from "@/components/dashboard/TopMerchants";
+import { Subscriptions } from "@/components/dashboard/Subscriptions";
 import {
   getCategoryColor,
   isExcludedFromTotals,
@@ -23,9 +24,6 @@ import { SavingsProjection } from "@/components/dashboard/SavingsProjection";
 import { DashboardRealtime } from "@/components/dashboard/DashboardRealtime";
 import { AuthGate } from "@/components/auth/AuthGate";
 import { format, addMonths, startOfMonth, subDays, getDay, getDate, getDaysInMonth } from "date-fns";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Repeat } from "lucide-react";
-import { formatCurrency } from "@/lib/utils/currency";
 import {
   fetchRedbarkTotalBalanceCents,
   syncRedbarkBalancesToDatabase,
@@ -37,6 +35,10 @@ import {
   buildMerchantLeaderboard,
   type MerchantTxnLite,
 } from "@/lib/dashboard/merchant-summary";
+import {
+  buildSubscriptionSummary,
+  type SubscriptionTxnLite,
+} from "@/lib/dashboard/subscriptions";
 import { RunCategoriseButton } from "@/components/dashboard/RunCategoriseButton";
 import { CategorisationStatus } from "@/components/dashboard/CategorisationStatus";
 
@@ -83,12 +85,6 @@ async function DashboardContent() {
     .reduce((sum, t) => sum + t.amount_cents, 0);
 
   const spendingThisMonth = grossSpendingThisMonth - reimbursementsThisMonth;
-
-  const recurringSpendingThisMonth = txns
-    .filter(
-      (t) => t.direction === "debit" && t.is_recurring === true && !isExcludedFromTotals(t)
-    )
-    .reduce((sum, t) => sum + Math.abs(t.amount_cents), 0);
 
   // Weekly spending for spending goal tracker
   const { start: weekStart, end: weekEnd } = getCurrentWeek();
@@ -226,7 +222,7 @@ async function DashboardContent() {
   const { data: spendWindowTxns } = await supabase
     .from("transactions")
     .select(
-      "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, description, merchant, merchant_canonical"
+      "date, direction, amount_cents, ai_category, redbark_category, user_category_override, is_internal_transfer, is_recurring, description, merchant, merchant_canonical"
     )
     .gte("date", spendWindowStart)
     .order("date", { ascending: false });
@@ -235,6 +231,10 @@ async function DashboardContent() {
   const merchantLeaderboard = buildMerchantLeaderboard(
     (spendWindowTxns ?? []) as MerchantTxnLite[],
     { days: 90, limit: 10 }
+  );
+  const subscriptionSummary = buildSubscriptionSummary(
+    (spendWindowTxns ?? []) as SubscriptionTxnLite[],
+    { windowDays: 180 }
   );
 
   const monthIncomeMap: Record<string, number> = {};
@@ -385,24 +385,7 @@ async function DashboardContent() {
           daysIntoMonth={daysIntoMonth}
           daysInMonth={daysInMonth}
         />
-        <Card className="min-w-0">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Monthly Recurring Payments
-            </CardTitle>
-            <div className="rounded-lg bg-purple-50 p-2 dark:bg-purple-950">
-              <Repeat className="h-4 w-4 text-purple-600 dark:text-purple-400" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">
-              {formatCurrency(recurringSpendingThisMonth)}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Total recurring debit payments detected this month.
-            </p>
-          </CardContent>
-        </Card>
+        <Subscriptions summary={subscriptionSummary} />
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
