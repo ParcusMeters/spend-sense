@@ -384,24 +384,8 @@ async function DashboardContent() {
         pace={monthPace}
       />
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <SpendingGoalTracker
-          weeklySpendingCents={weeklySpending}
-          monthlySpendingCents={spendingThisMonth}
-          daysIntoWeek={daysIntoWeek}
-          daysIntoMonth={daysIntoMonth}
-          daysInMonth={daysInMonth}
-        />
-        <Subscriptions summary={subscriptionSummary} />
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <WeeklySummary summary={weeklySummary} />
-        <TopMerchants leaderboard={merchantLeaderboard} />
-      </div>
-
-      <CategoryTrends result={categoryTrends} />
-
+      {/* Spending over time first: the shape of the habit is the thing being
+          tracked, and everything below explains or breaks down what it shows. */}
       <TrendAndDailySection
         monthlyTrendData={monthlyTrendData}
         monthlyTrendCategories={monthlyTrendCategories}
@@ -413,6 +397,28 @@ async function DashboardContent() {
         dailyBudgetCents={dailyBudgetCents}
       />
 
+      {/* Am I on track right now? */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <SpendingGoalTracker
+          weeklySpendingCents={weeklySpending}
+          monthlySpendingCents={spendingThisMonth}
+          daysIntoWeek={daysIntoWeek}
+          daysIntoMonth={daysIntoMonth}
+          daysInMonth={daysInMonth}
+        />
+        <WeeklySummary summary={weeklySummary} />
+      </div>
+
+      {/* What is drifting, month over month. */}
+      <CategoryTrends result={categoryTrends} />
+
+      {/* Where it actually goes, and what recurs. */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <TopMerchants leaderboard={merchantLeaderboard} />
+        <Subscriptions summary={subscriptionSummary} />
+      </div>
+
+      {/* Reference: detail and outlook rather than day-to-day tracking. */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <RecentTransactions transactions={recentTxns ?? []} />
         <SavingsProjection

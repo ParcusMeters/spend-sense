@@ -11,6 +11,12 @@ interface SpendingChartProps {
   }[];
   title?: string;
   emptyLabel?: string;
+  /**
+   * "stack" keeps the legend under the wheel, for when this sits in a narrow
+   * column — the default side-by-side layout keys off viewport width, which says
+   * nothing about how much room the card itself has.
+   */
+  layout?: "auto" | "stack";
 }
 
 interface PieTooltipEntry {
@@ -54,6 +60,7 @@ export function SpendingChart({
   data,
   title = "Spending by Category (Last 6 Months)",
   emptyLabel = "the last 6 months",
+  layout = "auto",
 }: SpendingChartProps) {
   const total = data.reduce((sum, d) => sum + d.value, 0);
   const hasData = data.length > 0 && total > 0;
@@ -75,7 +82,11 @@ export function SpendingChart({
             </p>
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-4 lg:flex-row">
+          <div
+            className={`flex flex-col items-center gap-4 ${
+              layout === "auto" ? "lg:flex-row" : ""
+            }`}
+          >
             <div className="h-[220px] w-[220px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>

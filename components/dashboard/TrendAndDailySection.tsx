@@ -78,15 +78,6 @@ export function TrendAndDailySection({
 
   return (
     <div className="space-y-6">
-      <SpendingChart
-        data={monthCategories ?? defaultSpendingByCategory}
-        title={
-          monthLabel
-            ? `Spending by Category — ${monthLabel}`
-            : "Spending by Category (Last 6 Months)"
-        }
-        emptyLabel={monthLabel ?? "the last 6 months"}
-      />
       <MonthlyTrend
         data={monthlyTrendData}
         categories={monthlyTrendCategories}
@@ -130,17 +121,29 @@ export function TrendAndDailySection({
             ))}
           </div>
         </div>
-        <DailySpendingCategoryChart
-          title={dailyTitle}
-          data={displayDailyData}
-          categories={displayDailyCategories}
-          budgetCents={dailyBudgetCents ?? undefined}
-          bucketNoun={granularity}
-          onRangeClick={(fromIso, toIso) => {
-            const q = new URLSearchParams({ from: fromIso, to: toIso });
-            router.push(`/transactions?${q.toString()}`);
-          }}
-        />
+        {/* The wheel answers "on what" for the same period the bars cover, so it
+            sits beside them rather than in its own full-width row. */}
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+          <div className="min-w-0 xl:col-span-2">
+            <DailySpendingCategoryChart
+              title={dailyTitle}
+              data={displayDailyData}
+              categories={displayDailyCategories}
+              budgetCents={dailyBudgetCents ?? undefined}
+              bucketNoun={granularity}
+              onRangeClick={(fromIso, toIso) => {
+                const q = new URLSearchParams({ from: fromIso, to: toIso });
+                router.push(`/transactions?${q.toString()}`);
+              }}
+            />
+          </div>
+          <SpendingChart
+            layout="stack"
+            data={monthCategories ?? defaultSpendingByCategory}
+            title={monthLabel ? `Categories — ${monthLabel}` : "Categories (Last 6 Months)"}
+            emptyLabel={monthLabel ?? "the last 6 months"}
+          />
+        </div>
       </div>
     </div>
   );
